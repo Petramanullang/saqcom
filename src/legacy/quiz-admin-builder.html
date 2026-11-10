@@ -1,0 +1,828 @@
+<!--ATTRS "class=\"bg-gray-50 dark:bg-gray-900 min-h-screen\" x-data=\"builder()\" x-cloak" -->
+<!--STYLE-->
+<style>
+[x-cloak] { display: none !important; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.resize-none { resize: none; }
+</style>
+<!--/STYLE-->
+
+
+<!--NAV-->
+
+<!-- ===== HEADER ===== -->
+<div class="gradient-header text-white py-6 px-4">
+<div class="max-w-6xl mx-auto flex items-center justify-between gap-4">
+<div class="flex items-center gap-3">
+<a href="/admin/quiz" class="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+</a>
+<div>
+<h1 class="text-xl font-extrabold" x-text="quizId ? 'Edit Quiz' : 'Buat Quiz Baru'"></h1>
+<p class="text-white/70 text-xs" x-text="lastSaved ? 'Tersimpan ' + lastSaved : 'Belum disimpan'"></p>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<!-- Import -->
+<button @click="showImport=true"
+class="flex items-center gap-1.5 px-3 py-2 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold rounded-lg transition-all border border-white/20">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+Import
+</button>
+<!-- Export -->
+<button @click="exportExcel()"
+class="flex items-center gap-1.5 px-3 py-2 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold rounded-lg transition-all border border-white/20">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+Export
+</button>
+<!-- Save -->
+<button @click="saveQuiz()" :disabled="saving"
+class="flex items-center gap-1.5 px-4 py-2 bg-white text-purple-700 text-xs font-bold rounded-lg shadow-sm hover:bg-purple-50 transition-all disabled:opacity-60">
+<svg x-show="!saving" xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+<svg x-show="saving" class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+<span x-text="saving ? 'Menyimpan...' : 'Simpan'"></span>
+</button>
+</div>
+</div>
+</div>
+
+<!-- ===== MAIN LAYOUT ===== -->
+<div class="max-w-6xl mx-auto px-4 py-6 pb-24 flex flex-col lg:flex-row gap-5">
+
+<!-- ===== LEFT: Questions ===== -->
+<div class="flex-1 min-w-0 space-y-4">
+
+<!-- Quiz Meta Card -->
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+<div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span class="text-sm font-bold text-gray-700 dark:text-gray-300">Informasi Quiz</span>
+</div>
+<div class="p-5 space-y-3">
+<div>
+<label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Judul Quiz *</label>
+<input type="text" x-model="quiz.title" placeholder="Contoh: Ujian Tengah Semester Pemrograman Web"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+<div>
+<label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Deskripsi</label>
+<textarea x-model="quiz.description" rows="2" placeholder="Deskripsi singkat tentang quiz ini..."
+class="q-input resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"></textarea>
+</div>
+</div>
+</div>
+
+<!-- Add Question Button -->
+<div class="flex flex-wrap gap-2">
+<div class="relative" x-data="{open:false}">
+<button @click="open=!open"
+class="btn flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+Tambah Soal
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+</button>
+<div x-show="open" @click.away="open=false" x-transition
+class="absolute top-full left-0 mt-1 w-60 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden slide-down">
+<div class="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+<span class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Pilih Tipe Soal</span>
+</div>
+<template x-for="t in questionTypes" :key="t.id">
+<button @click="addQuestion(t.id); open=false"
+class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors">
+<span x-html="t.icon" class="flex-shrink-0 w-5 text-center"></span>
+<div class="text-left">
+<div class="font-semibold text-xs" x-text="t.label"></div>
+<div class="text-xs text-gray-400 dark:text-gray-500" x-text="t.desc"></div>
+</div>
+</button>
+</template>
+</div>
+</div>
+</div>
+
+<!-- Questions List -->
+<div id="q-sortable" class="space-y-3">
+<template x-for="(q, qi) in questions" :key="q.id">
+<div class="question-card bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+:class="activeQ === q.id ? 'active' : ''"
+:data-id="q.id">
+
+<!-- Card Header -->
+<div class="flex items-center gap-2 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700 cursor-pointer select-none"
+@click="toggleQ(q.id)">
+<div class="drag-handle p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+</div>
+<span class="text-xs font-bold text-gray-400 dark:text-gray-500 w-6 text-center" x-text="'Q'+(qi+1)"></span>
+<span class="flex-1 text-sm font-medium text-gray-700 dark:text-gray-300 truncate" x-text="q.text || 'Pertanyaan baru...'"></span>
+<span class="type-badge flex-shrink-0" :class="typeBadgeClass(q.type)" x-text="typeLabel(q.type)"></span>
+<div class="flex items-center gap-0.5 ml-1" @click.stop>
+<button @click="dupQ(qi)" title="Duplikat" class="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+</button>
+<button @click="delQ(qi)" title="Hapus" class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+</button>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 transition-transform duration-200 ml-1" :class="activeQ===q.id?'rotate-180':''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+</div>
+</div>
+
+<!-- Card Body -->
+<div x-show="activeQ === q.id" x-transition class="p-5 space-y-4">
+
+<!-- Question text -->
+<div>
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Pertanyaan</label>
+<textarea x-model="q.text" rows="2" placeholder="Tulis pertanyaan di sini..."
+class="q-input resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"></textarea>
+</div>
+
+<!-- Type selector -->
+<div>
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Tipe Soal</label>
+<div class="flex flex-wrap gap-1.5">
+<template x-for="t in questionTypes" :key="t.id">
+<button @click="changeType(q, t.id)"
+:class="q.type===t.id ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-400 text-purple-700 dark:text-purple-300' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-purple-300'"
+class="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold border rounded-lg transition-all">
+<span x-html="t.icon" class="w-4 text-center"></span>
+<span x-text="t.label"></span>
+</button>
+</template>
+</div>
+</div>
+
+<!-- ===== OPTIONS: multiple_choice / checkbox / dropdown ===== -->
+<div x-show="['multiple_choice','checkbox','dropdown'].includes(q.type)" class="space-y-2">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+Pilihan Jawaban
+<span x-show="q.type==='checkbox'" class="ml-1 normal-case font-normal text-purple-500">(centang semua yang benar)</span>
+</label>
+<template x-for="(opt, oi) in (q.options || [])" :key="oi">
+<div class="option-row flex items-center gap-2 p-2.5 rounded-xl border transition-all"
+:class="isCorrect(q,oi) ? 'option-correct' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30'">
+<button @click="toggleCorrect(q,oi)"
+:title="isCorrect(q,oi) ? 'Jawaban benar' : 'Tandai benar'"
+:class="isCorrect(q,oi) ? 'text-green-500' : 'text-gray-300 dark:text-gray-600 hover:text-green-400'"
+class="flex-shrink-0 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" :fill="isCorrect(q,oi)?'currentColor':'none'" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+</button>
+<span class="text-xs font-bold text-gray-400 w-5 text-center" x-text="String.fromCharCode(65+oi)"></span>
+<input type="text" x-model="opt.text" :placeholder="'Pilihan '+String.fromCharCode(65+oi)"
+class="flex-1 text-sm bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400">
+<button @click="removeOpt(q,oi)" x-show="(q.options || []).length>2"
+class="option-del p-1 rounded text-gray-400 hover:text-red-500 transition-colors flex-shrink-0">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+</button>
+</div>
+</template>
+<button @click="addOpt(q)" x-show="(q.options || []).length < 10"
+class="flex items-center gap-1.5 text-xs font-semibold text-purple-600 dark:text-purple-400 hover:text-purple-700 mt-1 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+Tambah pilihan
+</button>
+</div>
+
+<!-- ===== TRUE/FALSE ===== -->
+<div x-show="q.type==='true_false'" class="space-y-2">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Jawaban Benar</label>
+<div class="flex gap-3">
+<button @click="q.correctAnswer='true'"
+:class="q.correctAnswer==='true' ? 'bg-green-100 dark:bg-green-900/30 border-green-400 text-green-700 dark:text-green-300' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-green-300'"
+class="flex-1 py-3 text-sm font-bold border-2 rounded-xl transition-all">✓ Benar (True)</button>
+<button @click="q.correctAnswer='false'"
+:class="q.correctAnswer==='false' ? 'bg-red-100 dark:bg-red-900/30 border-red-400 text-red-700 dark:text-red-300' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-red-300'"
+class="flex-1 py-3 text-sm font-bold border-2 rounded-xl transition-all">✗ Salah (False)</button>
+</div>
+</div>
+
+<!-- ===== SHORT ANSWER / ESSAY / FILL BLANK ===== -->
+<div x-show="['short_answer','essay','fill_blank'].includes(q.type)" class="space-y-2">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+Kunci Jawaban
+<span x-show="q.type==='fill_blank'" class="ml-1 normal-case font-normal text-gray-400">(pisahkan dengan koma)</span>
+<span x-show="q.type==='essay'" class="ml-1 normal-case font-normal text-gray-400">(contoh jawaban, tidak dinilai otomatis)</span>
+</label>
+<template x-if="q.type!=='essay'">
+<input type="text" x-model="q.correctAnswer" placeholder="Masukkan jawaban yang diterima..."
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</template>
+<template x-if="q.type==='essay'">
+<textarea x-model="q.correctAnswer" rows="3" placeholder="Contoh jawaban ideal..."
+class="q-input resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"></textarea>
+</template>
+</div>
+
+<!-- ===== RATING ===== -->
+<div x-show="q.type==='rating'" class="space-y-3">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Skala Rating</label>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="text-sm text-gray-600 dark:text-gray-400">Min:</span>
+<input type="number" x-model.number="q.ratingMin" min="0" max="5"
+class="w-16 q-input text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+<div class="flex items-center gap-2">
+<span class="text-sm text-gray-600 dark:text-gray-400">Max:</span>
+<input type="number" x-model.number="q.ratingMax" min="2" max="10"
+class="w-16 q-input text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+</div>
+<div class="flex gap-1.5">
+<template x-for="i in Math.max(0, q.ratingMax - q.ratingMin + 1)" :key="i">
+<div class="flex-1 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center text-xs font-bold text-purple-600 dark:text-purple-400"
+x-text="q.ratingMin + i - 1"></div>
+</template>
+</div>
+</div>
+
+<!-- ===== DATE / TIME ===== -->
+<div x-show="q.type==='date'||q.type==='time'" class="space-y-2">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Jawaban Benar (opsional)</label>
+<input :type="q.type" x-model="q.correctAnswer"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white w-auto">
+</div>
+
+<!-- Footer: points, required, hint -->
+<div class="flex flex-wrap items-center gap-4 pt-3 border-t border-gray-100 dark:border-gray-700">
+<label class="flex items-center gap-2 text-xs font-semibold text-gray-600 dark:text-gray-400 cursor-pointer">
+<input type="checkbox" x-model="q.required" class="rounded text-purple-600 w-3.5 h-3.5">
+Wajib diisi
+</label>
+<div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+<span class="font-semibold">Poin:</span>
+<input type="number" x-model.number="q.points" min="0" max="100"
+class="w-14 px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none text-center">
+</div>
+<div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+<input type="text" x-model="q.hint" placeholder="Petunjuk (opsional)..."
+class="px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none w-44">
+</div>
+</div>
+</div>
+</div>
+</template>
+</div>
+
+<!-- Empty state -->
+<div x-show="questions.length===0" class="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600">
+<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-purple-100 dark:bg-purple-900/30 mb-3">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+</div>
+<p class="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">Belum ada soal</p>
+<p class="text-xs text-gray-400 dark:text-gray-500">Pilih tipe soal di bawah untuk mulai</p>
+</div>
+
+<!-- Tambah soal: pilihan tipe selalu terlihat -->
+<div class="mt-4 p-4 rounded-2xl border-2 border-dashed border-purple-300 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/10">
+<p class="text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 mb-3">+ Tambah soal baru</p>
+<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2">
+<template x-for="t in questionTypes" :key="'pick-' + t.id">
+<button type="button" @click="addQuestion(t.id)" class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-purple-400 hover:shadow-sm text-left transition">
+<span x-html="t.icon" class="flex-shrink-0 w-5 text-center"></span>
+<span class="text-xs font-semibold text-gray-700 dark:text-gray-200" x-text="t.label"></span>
+</button>
+</template>
+</div>
+</div>
+</div>
+
+<!-- ===== RIGHT: Settings Panel ===== -->
+<div class="w-full lg:w-80 flex-shrink-0 space-y-4">
+
+<!-- Quiz Settings -->
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden sticky top-20">
+<div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+<span class="text-sm font-bold text-gray-700 dark:text-gray-300">Pengaturan Quiz</span>
+</div>
+<div class="p-4 space-y-4">
+
+<!-- Status -->
+<div>
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Status</label>
+<select x-model="quiz.status" class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm">
+<option value="draft">📝 Draft</option>
+<option value="open">✅ Buka — bisa dikerjakan</option>
+<option value="locked">🔒 Kunci sementara</option>
+<option value="closed">🚫 Tutup / selesai</option>
+</select>
+</div>
+
+<!-- Akses kelas -->
+<div>
+<div class="flex items-center justify-between mb-2">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Kelas yang boleh akses</label>
+<button type="button" class="text-[11px] font-semibold text-purple-600 hover:underline" @click="quiz.kelas_akses = []" x-show="quiz.kelas_akses.length">Semua kelas</button>
+</div>
+<div class="text-xs mb-2" :class="quiz.kelas_akses.length ? 'text-purple-700 dark:text-purple-300 font-semibold' : 'text-gray-500'"
+ x-text="quiz.kelas_akses.length ? quiz.kelas_akses.length + ' kelas dipilih' : 'Semua kelas boleh mengerjakan'"></div>
+<input type="search" x-model="cariKelas" placeholder="Cari matkul / kelas…" class="q-input !py-1.5 !text-xs mb-2">
+<div class="max-h-60 overflow-y-auto space-y-1 pr-1">
+<template x-for="k in kelasOpsi.filter(k => !cariKelas || k.cari.includes(cariKelas.toLowerCase()))" :key="k.id">
+<label class="flex items-start gap-2 p-2 rounded-lg cursor-pointer hover:bg-purple-50 dark:hover:bg-purple-900/20" :class="quiz.kelas_akses.includes(k.id) && 'bg-purple-50 dark:bg-purple-900/20'">
+<input type="checkbox" class="mt-0.5 accent-purple-600" :value="k.id" x-model.number="quiz.kelas_akses">
+<span class="text-xs leading-tight"><span class="font-semibold text-gray-800 dark:text-gray-200" x-text="k.label"></span><br><span class="text-gray-400" x-text="k.waktu"></span></span>
+</label>
+</template>
+<p x-show="!kelasOpsi.length" class="text-xs text-gray-400">Belum ada jadwal di semester aktif.</p>
+</div>
+</div>
+
+
+<!-- Time Limit -->
+<div>
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+Batas Waktu
+</label>
+<div class="flex items-center gap-2">
+<input type="number" x-model.number="quiz.settings.timeLimit" min="0" max="300" placeholder="0"
+class="q-input flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm text-center">
+<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">menit</span>
+</div>
+<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">0 = tanpa batas waktu</p>
+</div>
+
+<!-- Passing Score -->
+<div>
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Nilai Lulus (%)</label>
+<div class="flex items-center gap-2">
+<input type="number" x-model.number="quiz.settings.passingScore" min="0" max="100" placeholder="0"
+class="q-input flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm text-center">
+<span class="text-xs text-gray-500 dark:text-gray-400">%</span>
+</div>
+<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">0 = tidak ada nilai lulus</p>
+</div>
+
+<!-- Toggles -->
+<div class="space-y-3 pt-1">
+<label class="flex items-center justify-between cursor-pointer">
+<div>
+<div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Tampilkan Hasil</div>
+<div class="text-xs text-gray-400 dark:text-gray-500">Skor langsung setelah submit</div>
+</div>
+<button @click="quiz.settings.showResults = !quiz.settings.showResults"
+:class="quiz.settings.showResults ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-600'"
+class="relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0">
+<span :class="quiz.settings.showResults ? 'translate-x-5' : 'translate-x-0.5'"
+class="absolute left-0 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></span>
+</button>
+</label>
+
+<label class="flex items-center justify-between cursor-pointer">
+<div>
+<div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Tampilkan Jawaban Benar</div>
+<div class="text-xs text-gray-400 dark:text-gray-500">Setelah submit quiz</div>
+</div>
+<button @click="quiz.settings.showCorrectAnswers = !quiz.settings.showCorrectAnswers"
+:class="quiz.settings.showCorrectAnswers ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-600'"
+class="relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0">
+<span :class="quiz.settings.showCorrectAnswers ? 'translate-x-5' : 'translate-x-0.5'"
+class="absolute left-0 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></span>
+</button>
+</label>
+
+<label class="flex items-center justify-between cursor-pointer">
+<div>
+<div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Acak Soal</div>
+<div class="text-xs text-gray-400 dark:text-gray-500">Urutan soal diacak</div>
+</div>
+<button @click="quiz.settings.shuffleQuestions = !quiz.settings.shuffleQuestions"
+:class="quiz.settings.shuffleQuestions ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-600'"
+class="relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0">
+<span :class="quiz.settings.shuffleQuestions ? 'translate-x-5' : 'translate-x-0.5'"
+class="absolute left-0 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></span>
+</button>
+</label>
+
+<label class="flex items-center justify-between cursor-pointer">
+<div>
+<div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Acak Pilihan</div>
+<div class="text-xs text-gray-400 dark:text-gray-500">Urutan pilihan diacak</div>
+</div>
+<button @click="quiz.settings.shuffleOptions = !quiz.settings.shuffleOptions"
+:class="quiz.settings.shuffleOptions ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-600'"
+class="relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0">
+<span :class="quiz.settings.shuffleOptions ? 'translate-x-5' : 'translate-x-0.5'"
+class="absolute left-0 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></span>
+</button>
+</label>
+
+<label class="flex items-center justify-between cursor-pointer">
+<div>
+<div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Izinkan Retake</div>
+<div class="text-xs text-gray-400 dark:text-gray-500">Boleh mengerjakan ulang</div>
+</div>
+<button @click="quiz.settings.allowRetake = !quiz.settings.allowRetake"
+:class="quiz.settings.allowRetake ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-600'"
+class="relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0">
+<span :class="quiz.settings.allowRetake ? 'translate-x-5' : 'translate-x-0.5'"
+class="absolute left-0 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></span>
+</button>
+</label>
+</div>
+
+<!-- Summary -->
+<div class="pt-3 border-t border-gray-100 dark:border-gray-700 space-y-1.5">
+<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+<span>Total soal:</span>
+<span class="font-bold text-gray-700 dark:text-gray-300" x-text="questions.length"></span>
+</div>
+<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+<span>Total poin:</span>
+<span class="font-bold text-gray-700 dark:text-gray-300" x-text="totalPoints"></span>
+</div>
+</div>
+
+<!-- Student link -->
+<div x-show="quizId && quiz.status === 'open'" class="pt-2 border-t border-gray-100 dark:border-gray-700">
+<label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Link Mahasiswa</label>
+<div class="flex gap-1.5">
+<input type="text" :value="studentUrl" readonly
+class="q-input flex-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-white cursor-pointer" @click="copyLink()">
+<button @click="copyLink()" class="px-2.5 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-xs font-semibold hover:bg-purple-200 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ===== IMPORT MODAL ===== -->
+<div x-show="showImport" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" @click.self="showImport=false">
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden" x-transition>
+<div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+<h3 class="text-base font-bold text-gray-800 dark:text-white">Import Quiz dari Excel</h3>
+<button @click="showImport=false" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+</button>
+</div>
+<div class="p-6 space-y-4">
+<div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 text-xs text-blue-700 dark:text-blue-300">
+<p class="font-bold mb-1">Format kolom Excel:</p>
+<code class="block bg-blue-100 dark:bg-blue-900/40 rounded-lg p-2 overflow-x-auto whitespace-nowrap">
+type | text | optionA | optionB | optionC | optionD | correct | points | required | hint
+</code>
+<p class="mt-2">Tipe: <code>multiple_choice</code>, <code>checkbox</code>, <code>true_false</code>, <code>short_answer</code>, <code>essay</code>, <code>rating</code>, <code>dropdown</code>, <code>fill_blank</code></p>
+</div>
+<button @click="downloadTemplate()" class="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 text-sm font-semibold transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+Download Template Excel
+</button>
+<div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center cursor-pointer hover:border-purple-400 transition-all"
+@dragover.prevent @drop.prevent="importDrop($event)" @click="$refs.importFile.click()">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-gray-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+<p class="text-sm font-medium text-gray-600 dark:text-gray-400">Drag & drop atau klik untuk pilih file</p>
+<p class="text-xs text-gray-400 mt-1">.xlsx, .xls</p>
+<input type="file" x-ref="importFile" accept=".xlsx,.xls" class="hidden" @change="importFile($event)">
+</div>
+<div x-show="importMsg" :class="importErr ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border-red-200' : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-200'"
+class="text-sm p-3 rounded-xl border" x-text="importMsg"></div>
+</div>
+</div>
+</div>
+
+<!-- Toast -->
+<div id="toast-root" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+<script>
+const QUIZ_ID = new URLSearchParams(location.search).get('id');
+
+function builder() {
+return {
+quizId: QUIZ_ID,
+saving: false,
+lastSaved: '',
+activeQ: null,
+showImport: false,
+importMsg: '',
+importErr: false,
+
+kelasOpsi: JSON.parse(document.getElementById('opsi-kelas')?.textContent || '[]'),
+cariKelas: '',
+quiz: {
+kelas_akses: [],
+title: '',
+description: '',
+status: 'draft',
+settings: {
+timeLimit: 0,
+shuffleQuestions: false,
+shuffleOptions: false,
+showResults: true,
+showCorrectAnswers: true,
+allowRetake: false,
+passingScore: 0,
+},
+},
+
+questions: [],
+
+questionTypes: [
+{ id:'multiple_choice', label:'Pilihan Ganda',   desc:'Satu jawaban benar',         icon:'<svg class="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="9" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>' },
+{ id:'checkbox',        label:'Kotak Centang',   desc:'Beberapa jawaban benar',      icon:'<svg class="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
+{ id:'true_false',      label:'Benar/Salah',     desc:'Dua pilihan',                 icon:'<svg class="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"/></svg>' },
+{ id:'short_answer',    label:'Jawaban Singkat', desc:'Teks pendek',                 icon:'<svg class="h-4 w-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h12"/></svg>' },
+{ id:'essay',           label:'Esai',            desc:'Jawaban panjang',             icon:'<svg class="h-4 w-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h12"/></svg>' },
+{ id:'rating',          label:'Rating',          desc:'Skala numerik',               icon:'<svg class="h-4 w-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' },
+{ id:'dropdown',        label:'Dropdown',        desc:'Pilih dari daftar',           icon:'<svg class="h-4 w-4 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>' },
+{ id:'fill_blank',      label:'Isi Kosong',      desc:'Lengkapi kalimat',            icon:'<svg class="h-4 w-4 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>' },
+{ id:'date',            label:'Tanggal',         desc:'Pilih tanggal',               icon:'<svg class="h-4 w-4 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' },
+{ id:'time',            label:'Waktu',           desc:'Pilih waktu',                 icon:'<svg class="h-4 w-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
+],
+
+get totalPoints() {
+return this.questions.reduce((s, q) => s + (q.points || 0), 0);
+},
+
+get studentUrl() {
+return this.quizId ? location.origin + '/quiz/take?id=' + this.quizId + (this.quiz.kelas_akses.length === 1 ? '&kelas=' + this.quiz.kelas_akses[0] : '') : '';
+},
+
+async init() {
+if (QUIZ_ID) await this.loadQuiz();
+this.$nextTick(() => this.initSortable());
+},
+
+async loadQuiz() {
+try {
+const res = await fetch('/api/quiz?action=get_quiz&id=' + QUIZ_ID);
+const data = await res.json();
+if (data.ok) {
+const q = data.quiz;
+this.quiz.title       = q.title;
+this.quiz.description = q.description;
+this.quiz.status      = q.status;
+this.quiz.settings    = { ...this.quiz.settings, ...q.settings };
+this.questions        = q.questions || [];
+this.quiz.kelas_akses = Array.isArray(q.kelas_akses) ? q.kelas_akses.map(Number) : [];
+if (this.questions.length && !this.activeQ) this.activeQ = this.questions[0].id;
+this.lastSaved        = 'dari server';
+} else {
+this.toast('Quiz tidak ditemukan', 'error');
+}
+} catch(e) {
+this.toast('Gagal memuat quiz', 'error');
+}
+},
+
+initSortable() {
+const el = document.getElementById('q-sortable');
+if (el && typeof Sortable !== 'undefined') {
+Sortable.create(el, {
+handle: '.drag-handle',
+animation: 150,
+ghostClass: 'sortable-ghost',
+chosenClass: 'sortable-chosen',
+onEnd: (e) => {
+const moved = this.questions.splice(e.oldIndex, 1)[0];
+this.questions.splice(e.newIndex, 0, moved);
+},
+});
+}
+},
+
+uid() {
+return 'q_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
+},
+
+makeQuestion(type) {
+const base = { id: this.uid(), type, text: '', required: false, points: 1, hint: '', correctAnswer: null };
+if (['multiple_choice','checkbox','dropdown'].includes(type)) {
+base.options = [{text:''},{text:''},{text:''},{text:''}];
+if (type === 'checkbox') base.correctAnswers = [];
+}
+if (type === 'rating') { base.ratingMin = 1; base.ratingMax = 5; }
+return base;
+},
+
+addQuestion(type) {
+const q = this.makeQuestion(type);
+this.questions.push(q);
+this.activeQ = q.id;
+this.$nextTick(() => {
+document.querySelector(`[data-id="${q.id}"]`)?.scrollIntoView({ behavior:'smooth', block:'center' });
+});
+},
+
+toggleQ(id) { this.activeQ = this.activeQ === id ? null : id; },
+
+dupQ(i) {
+const copy = JSON.parse(JSON.stringify(this.questions[i]));
+copy.id = this.uid();
+copy.text += ' (Salinan)';
+this.questions.splice(i + 1, 0, copy);
+this.activeQ = copy.id;
+this.toast('Soal diduplikat', 'info');
+},
+
+delQ(i) {
+const q = this.questions[i];
+if (this.activeQ === q.id) this.activeQ = null;
+this.questions.splice(i, 1);
+this.toast('Soal dihapus', 'warning');
+},
+
+changeType(q, type) {
+q.type = type;
+if (['multiple_choice','checkbox','dropdown'].includes(type)) {
+if (!q.options || q.options.length < 2) q.options = [{text:''},{text:''},{text:''},{text:''}];
+if (type === 'checkbox' && !q.correctAnswers) q.correctAnswers = [];
+if (type !== 'checkbox') delete q.correctAnswers;
+}
+if (type === 'rating') { if (!q.ratingMin) q.ratingMin = 1; if (!q.ratingMax) q.ratingMax = 5; }
+q.correctAnswer = null;
+},
+
+addOpt(q) { if (q.options.length < 10) q.options.push({text:''}); },
+removeOpt(q, i) { q.options.splice(i, 1); },
+
+isCorrect(q, i) {
+if (q.type === 'checkbox') return (q.correctAnswers || []).includes(i);
+return q.correctAnswer === i;
+},
+
+toggleCorrect(q, i) {
+if (q.type === 'checkbox') {
+if (!q.correctAnswers) q.correctAnswers = [];
+const idx = q.correctAnswers.indexOf(i);
+if (idx === -1) q.correctAnswers.push(i);
+else q.correctAnswers.splice(idx, 1);
+} else {
+q.correctAnswer = q.correctAnswer === i ? null : i;
+}
+},
+
+typeLabel(type) {
+return { multiple_choice:'Pilihan Ganda', checkbox:'Checkbox', true_false:'Benar/Salah', short_answer:'Jawaban Singkat', essay:'Esai', rating:'Rating', dropdown:'Dropdown', fill_blank:'Isi Kosong', date:'Tanggal', time:'Waktu' }[type] || type;
+},
+
+typeBadgeClass(type) {
+return {
+multiple_choice:'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+checkbox:'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+true_false:'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+short_answer:'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+essay:'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+rating:'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+dropdown:'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300',
+fill_blank:'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300',
+date:'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300',
+time:'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+}[type] || 'bg-gray-100 text-gray-700';
+},
+
+async saveQuiz() {
+if (!this.quiz.title.trim()) { this.toast('Judul quiz wajib diisi', 'error'); return; }
+this.saving = true;
+try {
+const payload = {
+id: this.quizId,
+...this.quiz,
+questions: this.questions,
+};
+const res = await fetch('/api/quiz?action=save_quiz', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify(payload),
+});
+const data = await res.json();
+if (data.ok) {
+if (data.created) {
+this.quizId = data.id;
+history.replaceState(null, '', '?id=' + data.id);
+}
+this.lastSaved = new Date().toLocaleTimeString('id-ID');
+this.toast('Quiz berhasil disimpan!', 'success');
+} else {
+this.toast(data.error || 'Gagal menyimpan', 'error');
+}
+} catch(e) {
+this.toast('Gagal menyimpan: ' + e.message, 'error');
+}
+this.saving = false;
+},
+
+copyLink() {
+navigator.clipboard.writeText(this.studentUrl).then(() => this.toast('Link disalin!', 'success'));
+},
+
+// ===== EXPORT =====
+exportExcel() {
+if (!this.questions.length) { this.toast('Tidak ada soal', 'warning'); return; }
+const rows = [['type','text','optionA','optionB','optionC','optionD','optionE','correct','points','required','hint','ratingMin','ratingMax']];
+this.questions.forEach(q => {
+const opts = q.options || [];
+let correct = '';
+if (q.type === 'multiple_choice' || q.type === 'dropdown') correct = q.correctAnswer !== null ? String.fromCharCode(65 + q.correctAnswer) : '';
+else if (q.type === 'checkbox') correct = (q.correctAnswers||[]).map(i=>String.fromCharCode(65+i)).join(',');
+else correct = q.correctAnswer || '';
+rows.push([q.type, q.text||'', opts[0]?.text||'', opts[1]?.text||'', opts[2]?.text||'', opts[3]?.text||'', opts[4]?.text||'', correct, q.points||1, q.required?'yes':'no', q.hint||'', q.ratingMin||'', q.ratingMax||'']);
+});
+const infoRows = [['title',this.quiz.title],['description',this.quiz.description],['timeLimit',this.quiz.settings.timeLimit],['showResults',this.quiz.settings.showResults?'yes':'no'],['showCorrectAnswers',this.quiz.settings.showCorrectAnswers?'yes':'no'],['shuffleQuestions',this.quiz.settings.shuffleQuestions?'yes':'no'],['shuffleOptions',this.quiz.settings.shuffleOptions?'yes':'no'],['passingScore',this.quiz.settings.passingScore]];
+const wb = XLSX.utils.book_new();
+const ws = XLSX.utils.aoa_to_sheet(rows);
+ws['!cols'] = [{wch:16},{wch:40},{wch:20},{wch:20},{wch:20},{wch:20},{wch:20},{wch:12},{wch:8},{wch:10},{wch:20},{wch:10},{wch:10}];
+XLSX.utils.book_append_sheet(wb, ws, 'Questions');
+XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(infoRows), 'Quiz Info');
+XLSX.writeFile(wb, (this.quiz.title||'quiz') + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
+this.toast('Diekspor!', 'success');
+},
+
+downloadTemplate() {
+const rows = [
+['type','text','optionA','optionB','optionC','optionD','correct','points','required','hint'],
+['multiple_choice','Ibu kota Indonesia?','Jakarta','Surabaya','Bandung','Medan','A',1,'yes',''],
+['checkbox','Bilangan prima:','2','3','4','5','A,B,D',2,'no',''],
+['true_false','Matahari terbit dari timur','','','','','true',1,'yes',''],
+['short_answer','Rumus luas lingkaran','','','','','πr²',1,'no','Gunakan simbol π'],
+['essay','Jelaskan demokrasi','','','','','',2,'no',''],
+['rating','Tingkat kepuasan','','','','','',1,'no',''],
+['fill_blank','Pancasila terdiri dari ___ sila','','','','','5,lima',1,'yes',''],
+];
+const wb = XLSX.utils.book_new();
+const ws = XLSX.utils.aoa_to_sheet(rows);
+ws['!cols'] = [{wch:16},{wch:40},{wch:20},{wch:20},{wch:20},{wch:20},{wch:12},{wch:8},{wch:10},{wch:20}];
+XLSX.utils.book_append_sheet(wb, ws, 'Questions');
+XLSX.writeFile(wb, 'template_quiz.xlsx');
+this.toast('Template diunduh', 'success');
+},
+
+importDrop(e) { const f = e.dataTransfer.files[0]; if (f) this.processImport(f); },
+importFile(e) { const f = e.target.files[0]; if (f) this.processImport(f); },
+
+processImport(file) {
+if (!file.name.match(/\.(xlsx|xls)$/i)) { this.importMsg = 'File harus .xlsx atau .xls'; this.importErr = true; return; }
+const reader = new FileReader();
+reader.onload = (e) => {
+try {
+const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+// Read quiz info
+if (wb.SheetNames.includes('Quiz Info')) {
+const info = XLSX.utils.sheet_to_json(wb.Sheets['Quiz Info'], { header:1 });
+info.forEach(r => {
+if (r[0]==='title') this.quiz.title = r[1]||'';
+if (r[0]==='description') this.quiz.description = r[1]||'';
+if (r[0]==='timeLimit') this.quiz.settings.timeLimit = parseInt(r[1])||0;
+if (r[0]==='showResults') this.quiz.settings.showResults = r[1]==='yes';
+if (r[0]==='showCorrectAnswers') this.quiz.settings.showCorrectAnswers = r[1]==='yes';
+if (r[0]==='passingScore') this.quiz.settings.passingScore = parseInt(r[1])||0;
+});
+}
+const wsName = wb.SheetNames.includes('Questions') ? 'Questions' : wb.SheetNames[0];
+const rows = XLSX.utils.sheet_to_json(wb.Sheets[wsName], { header:1 });
+if (rows.length < 2) { this.importMsg = 'File kosong'; this.importErr = true; return; }
+const h = rows[0].map(x => String(x).toLowerCase().trim());
+const col = n => h.indexOf(n);
+const validTypes = ['multiple_choice','checkbox','true_false','short_answer','essay','rating','dropdown','fill_blank','date','time'];
+let count = 0;
+for (let i = 1; i < rows.length; i++) {
+const r = rows[i]; if (!r?.length) continue;
+const type = String(r[col('type')]||'').trim().toLowerCase();
+const text = String(r[col('text')]||'').trim();
+if (!validTypes.includes(type) || !text) continue;
+const q = this.makeQuestion(type);
+q.text = text;
+q.points = parseInt(r[col('points')])||1;
+q.required = String(r[col('required')]||'').toLowerCase()==='yes';
+q.hint = String(r[col('hint')]||'').trim();
+if (['multiple_choice','checkbox','dropdown'].includes(type)) {
+const opts = ['optiona','optionb','optionc','optiond','optione'].map(c => ({ text: String(r[col(c)]||'').trim() })).filter(o=>o.text);
+if (opts.length >= 2) q.options = opts;
+const correct = String(r[col('correct')]||'').trim().toUpperCase();
+if (type==='checkbox') q.correctAnswers = correct.split(',').map(c=>c.trim().charCodeAt(0)-65).filter(n=>n>=0&&n<q.options.length);
+else { const idx = correct.charCodeAt(0)-65; q.correctAnswer = (idx>=0&&idx<q.options.length)?idx:null; }
+} else if (type==='rating') {
+q.ratingMin = parseInt(r[col('ratingmin')])||1;
+q.ratingMax = parseInt(r[col('ratingmax')])||5;
+} else {
+q.correctAnswer = String(r[col('correct')]||'').trim();
+}
+this.questions.push(q); count++;
+}
+if (!count) { this.importMsg = 'Tidak ada soal valid'; this.importErr = true; return; }
+this.importMsg = `✓ ${count} soal berhasil diimpor!`; this.importErr = false;
+this.toast(`${count} soal diimpor!`, 'success');
+setTimeout(() => { this.showImport = false; this.importMsg = ''; }, 2000);
+} catch(err) { this.importMsg = 'Error: ' + err.message; this.importErr = true; }
+};
+reader.readAsArrayBuffer(file);
+},
+
+toast(msg, type='info') {
+const root = document.getElementById('toast-root');
+const colors = { success:'bg-green-100 dark:bg-green-800/90 border-green-300 text-green-800 dark:text-green-100', error:'bg-red-100 dark:bg-red-800/90 border-red-300 text-red-800 dark:text-red-100', info:'bg-blue-100 dark:bg-blue-800/90 border-blue-300 text-blue-800 dark:text-blue-100', warning:'bg-amber-100 dark:bg-amber-800/90 border-amber-300 text-amber-800 dark:text-amber-100' };
+const t = document.createElement('div');
+t.className = `toast-item flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium max-w-xs ${colors[type]||colors.info}`;
+t.innerHTML = `<span>${msg}</span>`;
+root.appendChild(t);
+requestAnimationFrame(() => t.classList.add('show'));
+setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 3500);
+},
+};
+}
+</script>

@@ -1,0 +1,239 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { all, get } from '../../lib/db';
+import { grupJurusan } from '../../lib/jurusan';
+import { kelasAktif } from '../../lib/kontrak';
+import { kelasHariIni, labelKelas, jamSelesai } from '../../lib/jadwal';
+const jadwalHariIni = kelasHariIni();
+import { todayWib, fmtWaktu, fmtTanggalPanjang, hexToRgb } from '../../lib/util';
+
+const { settings } = Astro.locals;
+const today = todayWib();
+const hitung = (rows: { jurusan: string }[]) => {
+  const c = { TI: 0, SI: 0, Lain: 0 };
+  for (const r of rows) c[grupJurusan(r.jurusan)]++;
+  return c;
+};
+const dosen = hitung(all<{ jurusan: string }>('SELECT jurusan FROM dosen'));
+const matkul = hitung(all<{ jurusan: string }>('SELECT jurusan FROM matkul'));
+const totalDosen = dosen.TI + dosen.SI + dosen.Lain;
+const totalMatkul = matkul.TI + matkul.SI + matkul.Lain;
+const totalMateri = get<{ c: number }>('SELECT COUNT(*) c FROM materi')!.c;
+
+const aktif = kelasAktif();
+const terisi = aktif ? get<{ c: number }>('SELECT COUNT(*) c FROM kontrak_kursi WHERE kelas_id = ?', aktif.id)!.c : 0;
+const totalKelasKontrak = get<{ c: number }>('SELECT COUNT(*) c FROM kontrak_kelas')!.c;
+const kelasSudahKontrak = get<{ c: number }>('SELECT COUNT(DISTINCT kelas_id) c FROM kontrak_kursi')!.c;
+const laporanPending = get<{ c: number }>("SELECT COUNT(*) c FROM laporan_kerusakan WHERE status = 'pending'")!.c;
+
+const tugasHariIni = get<{ c: number; m: number }>(
+  "SELECT COUNT(*) c, COUNT(DISTINCT nim) m FROM submission WHERE diarsipkan = 0 AND substr(created_at,1,10) = ?", today)!;
+const perKelasHariIni = all<{ id: number; nama: string; warna: string; c: number }>(
+  `SELECT k.id, k.nama, k.warna, COUNT(DISTINCT s.nim) c FROM submission s JOIN kelas_tugas k ON k.id = s.kelas_id
+   WHERE s.diarsipkan = 0 AND substr(s.created_at,1,10) = ? GROUP BY k.id ORDER BY c DESC`, today);
+const terbaru = all<{ id: number; nim: string; nama: string; created_at: string; terlambat: number; kelas: string; warna: string; n: number }>(
+  `SELECT s.id, s.nim, s.nama, s.created_at, s.terlambat, k.nama kelas, k.warna, (SELECT COUNT(*) FROM submission_file f WHERE f.submission_id = s.id) n
+   FROM submission s JOIN kelas_tugas k ON k.id = s.kelas_id WHERE s.diarsipkan = 0 ORDER BY s.created_at DESC, s.id DESC LIMIT 8`);
+const sesiDibuka = all<{ id: number; judul: string; deadline: string | null; kelas: string; kelas_id: number; warna: string; c: number }>(
+  `SELECT s.id, s.judul, s.deadline, k.nama kelas, k.id kelas_id, k.warna, (SELECT COUNT(DISTINCT nim) FROM submission x WHERE x.sesi_id = s.id) c
+   FROM sesi_tugas s JOIN kelas_tugas k ON k.id = s.kelas_id WHERE s.dibuka = 1 ORDER BY s.deadline IS NULL, s.deadline LIMIT 6`);
+const quizBuka = get<{ c: number }>("SELECT COUNT(*) c FROM quiz WHERE status = 'open'")!.c;
+
+const donut = (c: { TI: number; SI: number; Lain: number }) => {
+  const t = c.TI + c.SI + c.Lain;
+  if (!t) return 'conic-gradient(#e5e7eb 0deg 360deg)';
+  const a = (c.TI / t) * 360, b = a + (c.SI / t) * 360;
+  return `conic-gradient(#10b981 0deg ${a}deg, #3b82f6 ${a}deg ${b}deg, #f59e0b ${b}deg 360deg)`;
+};
+const progresKontrak = totalKelasKontrak ? Math.round((kelasSudahKontrak / totalKelasKontrak) * 100) : 0;
+const persenKursi = aktif ? Math.round((terisi / settings.jumlahPc) * 100) : 0;
+
+const nav = [
+  { href: '/admin/tugas', label: 'Tugas Masuk', icon: 'inbox', warna: 'indigo' },
+  { href: '/admin/tugas/kelas', label: 'Kelas & Sesi', icon: 'calendar', warna: 'sky' },
+  { href: '/admin/materi', label: 'Upload Materi', icon: 'book', warna: 'emerald' },
+  { href: '/admin/kontrak', label: 'Kontrak', icon: 'seat', warna: 'amber' },
+  { href: '/admin/quiz', label: 'Quiz', icon: 'quiz', warna: 'purple' },
+  { href: '/admin/dosen', label: 'Dosen', icon: 'users', warna: 'blue' },
+  { href: '/admin/matkul', label: 'Mata Kuliah', icon: 'book', warna: 'pink' },
+  { href: '/admin/timer', label: 'Timer', icon: 'clock', warna: 'rose', blank: true },
+] as const;
+const warnaNav: Record<string, string> = {
+  indigo: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-300', sky: 'bg-sky-50 text-sky-600 dark:bg-sky-900/20 dark:text-sky-300',
+  emerald: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300', amber: 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-300',
+  purple: 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-300', blue: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300',
+  pink: 'bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-300', rose: 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-300',
+};
+---
+<AdminLayout title="Dashboard Asisten" active="admin" alpine>
+  <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+    <div>
+      <p class="text-sm text-gray-500">{fmtTanggalPanjang(today)}</p>
+      <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Dashboard Asisten</h1>
+    </div>
+    <div class="card px-4 py-2.5 flex items-center gap-2 font-mono text-lg font-bold" x-data="{ t: '' }" x-init="const f = () => t = new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' }); f(); setInterval(f, 1000)">
+      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span><span x-text="t">--:--:--</span>
+    </div>
+  </div>
+
+  {laporanPending > 0 && (
+    <a href="/admin/kontrak" class="mb-5 flex items-center gap-3 p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 font-semibold text-sm">
+      <Icon name="alert" class="w-5 h-5" /> Ada {laporanPending} laporan kerusakan PC yang belum ditangani →
+    </a>
+  )}
+
+  <div class="grid lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 space-y-6">
+      <!-- Tugas hari ini -->
+      <div class="card p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 class="font-extrabold flex items-center gap-2"><Icon name="inbox" class="w-4 h-4 text-indigo-500" /> Tugas Masuk Hari Ini</h2>
+          <a href={`/admin/tugas?dari=${today}&sampai=${today}`} class="btn btn-sm btn-ghost">Buka Tugas Masuk →</a>
+        </div>
+        <div class="grid sm:grid-cols-3 gap-4 mb-4">
+          <div class="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20"><p class="label !mb-1">Upload</p><p class="text-3xl font-black text-indigo-700 dark:text-indigo-300">{tugasHariIni.c}</p></div>
+          <div class="p-4 rounded-2xl bg-sky-50 dark:bg-sky-900/20"><p class="label !mb-1">Mahasiswa</p><p class="text-3xl font-black text-sky-700 dark:text-sky-300">{tugasHariIni.m}</p></div>
+          <div class="p-4 rounded-2xl bg-purple-50 dark:bg-purple-900/20"><p class="label !mb-1">Quiz dibuka</p><p class="text-3xl font-black text-purple-700 dark:text-purple-300">{quizBuka}</p></div>
+        </div>
+        {perKelasHariIni.length > 0 && (
+          <div class="flex flex-wrap gap-2 mb-4">
+            {perKelasHariIni.map((k) => (
+              <a href={`/admin/tugas?kelas=${k.id}&dari=${today}&sampai=${today}`} class="badge !text-xs !px-2.5 !py-1" style={`background:rgba(${hexToRgb(k.warna)},.1);color:${k.warna}`}>{k.nama} · {k.c}</a>
+            ))}
+          </div>
+        )}
+        <div class="divide-y divide-gray-100 dark:divide-gray-700/60">
+          {terbaru.length === 0 && <p class="text-sm text-gray-500 py-4 text-center">Belum ada tugas masuk.</p>}
+          {terbaru.map((s) => (
+            <a href={`/admin/tugas?q=${s.nim}`} class="flex items-center gap-3 py-2.5 hover:bg-gray-50/60 dark:hover:bg-gray-700/20 rounded-lg px-1">
+              <span class="w-2 h-2 rounded-full shrink-0" style={`background:${s.warna}`}></span>
+              <span class="flex-1 min-w-0"><span class="font-semibold text-sm">{s.nama}</span> <span class="font-mono text-xs text-gray-400">{s.nim}</span><span class="block text-xs text-gray-500 truncate">{s.kelas} · {s.n} file</span></span>
+              {s.terlambat ? <span class="badge bg-amber-100 text-amber-700">Terlambat</span> : null}
+              <span class="text-xs text-gray-400 whitespace-nowrap">{fmtWaktu(s.created_at)}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <!-- Tugas dibuka -->
+      <div class="card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-extrabold flex items-center gap-2"><Icon name="calendar" class="w-4 h-4 text-sky-500" /> Tugas yang Sedang Dibuka</h2>
+          <a href="/admin/tugas/kelas" class="btn btn-sm btn-ghost">Kelola →</a>
+        </div>
+        {sesiDibuka.length === 0 ? <p class="text-sm text-gray-500">Tidak ada tugas/pertemuan yang dibuka. Mahasiswa mengumpulkan ke "Umum".</p> : (
+          <div class="grid sm:grid-cols-2 gap-3">
+            {sesiDibuka.map((s) => (
+              <a href={`/admin/tugas?kelas=${s.kelas_id}&sesi=${s.id}`} class="p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-sky-300">
+                <p class="text-xs font-bold" style={`color:${s.warna}`}>{s.kelas}</p>
+                <p class="font-bold text-sm">{s.judul}</p>
+                <p class="text-xs text-gray-500 mt-1">{s.c} mahasiswa · {s.deadline ? `deadline ${fmtWaktu(s.deadline)}` : 'tanpa deadline'}</p>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <!-- Statistik master -->
+      <div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="card p-5 flex items-center gap-4">
+          <div class="w-14 h-14 rounded-full shrink-0 relative" style={`background:${donut(dosen)}`}><div class="absolute inset-2 rounded-full bg-white dark:bg-gray-800"></div></div>
+          <div><p class="label !mb-0.5">Dosen</p><p class="text-2xl font-black">{totalDosen}</p><p class="text-[11px] text-gray-500">TI {dosen.TI} · SI {dosen.SI}{dosen.Lain ? ` · Lain ${dosen.Lain}` : ''}</p></div>
+        </div>
+        <div class="card p-5 flex items-center gap-4">
+          <div class="w-14 h-14 rounded-full shrink-0 relative" style={`background:${donut(matkul)}`}><div class="absolute inset-2 rounded-full bg-white dark:bg-gray-800"></div></div>
+          <div><p class="label !mb-0.5">Mata Kuliah</p><p class="text-2xl font-black">{totalMatkul}</p><p class="text-[11px] text-gray-500">TI {matkul.TI} · SI {matkul.SI}{matkul.Lain ? ` · Lain ${matkul.Lain}` : ''}</p></div>
+        </div>
+        <div class="card p-5"><p class="label !mb-0.5">Materi Terupload</p><p class="text-2xl font-black">{totalMateri}</p><a href="/admin/materi" class="text-xs text-emerald-600 font-semibold">Kelola →</a></div>
+        <div class="card p-5"><p class="label !mb-0.5">Kelas Sudah Kontrak</p><p class="text-2xl font-black">{kelasSudahKontrak}<span class="text-sm text-gray-400"> / {totalKelasKontrak}</span></p>
+          <div class="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 mt-2 overflow-hidden"><div class="h-full bg-amber-500" style={`width:${progresKontrak}%`}></div></div></div>
+      </div>
+    </div>
+
+    <aside class="space-y-6">
+      <!-- Jadwal hari ini -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-extrabold">Jadwal Hari Ini</h3>
+          <a href="/admin/jadwal" class="text-xs font-semibold text-blue-600">Semua →</a>
+        </div>
+        {jadwalHariIni.slots.length === 0 && <p class="text-sm text-gray-500">Tidak ada kelas praktikum hari ini.</p>}
+        <div class="space-y-2">
+          {jadwalHariIni.slots.map((sl) => {
+            const jalan = jadwalHariIni.berjalan?.jadwal.id === sl.jadwal.id;
+            return (
+              <div class:list={['p-3 rounded-2xl border', jalan ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800' : 'border-gray-100 dark:border-gray-700']}>
+                <div class="flex items-center gap-2 text-xs font-bold">
+                  {jalan && <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>}
+                  <span class:list={[jalan ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500']}>{sl.jam_mulai}–{jamSelesai(sl.jadwal, sl.jam_mulai)}{jalan ? ' · sedang berlangsung' : ''}{sl.pengganti ? ' · pengganti' : ''}</span>
+                </div>
+                <p class="font-semibold text-sm leading-snug mt-0.5">{labelKelas(sl.jadwal)}</p>
+                <p class="text-[11px] text-gray-500">PJ {sl.jadwal.asisten[0] ?? '-'}{sl.jadwal.asisten.slice(1).filter(Boolean).length ? ' · ' + sl.jadwal.asisten.slice(1).filter(Boolean).join(', ') : ''}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <!-- Sesi kontrak -->
+      <div class:list={['card p-6 relative overflow-hidden', aktif && 'border-emerald-200 dark:border-emerald-900/50']}>
+        <p class="label">Sesi Kontrak Tempat Duduk</p>
+        {aktif ? (
+          <>
+            <p class="text-lg font-black flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>{aktif.mk}</p>
+            <p class="text-sm text-gray-500 mb-4">Kelas {aktif.nama}{aktif.asisten_pj ? ` · PJ ${aktif.asisten_pj}` : ''}</p>
+            <div class="flex justify-between text-sm font-bold mb-1"><span>Keterisian PC</span><span>{terisi}/{settings.jumlahPc}</span></div>
+            <div class="h-3 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-500 to-teal-500" style={`width:${persenKursi}%`}></div></div>
+          </>
+        ) : <p class="text-lg font-black text-gray-400">Tidak ada sesi aktif</p>}
+        <a href="/admin/kontrak" class="btn btn-sm btn-ghost mt-4 w-full">Kelola Sesi Kontrak</a>
+      </div>
+
+      <!-- Navigasi -->
+      <div class="card p-5">
+        <h3 class="font-extrabold mb-3">Navigasi Asisten</h3>
+        <div class="grid grid-cols-2 gap-2">
+          {nav.map((n) => (
+            <a href={n.href} target={'blank' in n ? '_blank' : undefined} class="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border border-gray-100 dark:border-gray-700 hover:shadow-md transition text-center">
+              <span class:list={['w-10 h-10 rounded-xl flex items-center justify-center', warnaNav[n.warna]]}><Icon name={n.icon} class="w-5 h-5" /></span>
+              <span class="text-xs font-bold">{n.label}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <!-- Kalender -->
+      <div class="card p-5" x-data="kalender">
+        <div class="flex items-center justify-between mb-3">
+          <button type="button" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer" @click="geser(-1)"><Icon name="chevronLeft" /></button>
+          <span class="font-bold text-sm" x-text="judul"></span>
+          <button type="button" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer" @click="geser(1)"><Icon name="chevronRight" /></button>
+        </div>
+        <div class="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-1">{['Mg', 'Sn', 'Sl', 'Rb', 'Km', 'Jm', 'Sb'].map((h) => <div>{h}</div>)}</div>
+        <div class="grid grid-cols-7 gap-1 text-center text-sm">
+          <template x-for="(d, i) in hari" :key="i">
+            <div class="aspect-square flex items-center justify-center rounded-lg" :class="d.hariIni ? 'bg-blue-600 text-white font-bold' : d.n ? 'hover:bg-gray-100 dark:hover:bg-gray-700' : ''" x-text="d.n || ''"></div>
+          </template>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script is:inline>
+    document.addEventListener('alpine:init', () => {
+      const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      Alpine.data('kalender', () => ({
+        y: new Date().getFullYear(), m: new Date().getMonth(),
+        get judul() { return BULAN[this.m] + ' ' + this.y; },
+        get hari() {
+          const now = new Date(); const awal = new Date(this.y, this.m, 1).getDay(); const n = new Date(this.y, this.m + 1, 0).getDate();
+          const out = Array.from({ length: awal }, () => ({ n: 0 }));
+          for (let d = 1; d <= n; d++) out.push({ n: d, hariIni: d === now.getDate() && this.m === now.getMonth() && this.y === now.getFullYear() });
+          return out;
+        },
+        geser(k) { this.m += k; if (this.m < 0) { this.m = 11; this.y--; } if (this.m > 11) { this.m = 0; this.y++; } },
+      }));
+    });
+  </script>
+</AdminLayout>

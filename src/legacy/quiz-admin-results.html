@@ -1,0 +1,449 @@
+<!--ATTRS "class=\"bg-gray-50 dark:bg-gray-900 min-h-screen\" x-data=\"resultsPage()\" x-cloak" -->
+<!--STYLE-->
+<style>
+[x-cloak] { display: none !important; }
+.line-clamp-1 { display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+</style>
+<!--/STYLE-->
+
+
+<!--NAV-->
+
+<!-- ===== LOADING ===== -->
+<div x-show="loading" class="flex justify-center items-center py-32">
+<svg class="animate-spin h-8 w-8 text-purple-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+</div>
+
+aSZXxzZ<!-- ===== HEADER ===== -->
+<div class="gradient-header text-white py-6 px-4">
+<div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+<div class="flex items-center gap-3">
+<a href="/admin/quiz" class="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+</a>
+<div>
+<h1 class="text-xl font-extrabold" x-text="quiz.title || 'Hasil Quiz'"></h1>
+<p class="text-white/70 text-xs" x-text="submissions.length + ' pengerjaan'"></p>
+</div>
+</div>
+<div class="flex gap-2">
+<button @click="exportExcel()"
+class="flex items-center gap-1.5 px-3 py-2 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold rounded-lg border border-white/20 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+Export Excel
+</button>
+<a :href="'/admin/quiz/builder?id=' + quizId"
+class="flex items-center gap-1.5 px-3 py-2 bg-white text-purple-700 text-xs font-bold rounded-lg shadow-sm hover:bg-purple-50 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+Edit Quiz
+</a>
+</div>
+</div>
+</div>
+
+<!-- ===== STATS ===== -->
+<div class="max-w-6xl mx-auto px-4 -mt-4 mb-6">
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+<div class="text-2xl font-extrabold text-gray-800 dark:text-white" x-text="submissions.length"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Total Pengerjaan</div>
+</div>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+<div class="text-2xl font-extrabold text-gray-800 dark:text-white" x-text="avgScore + '%'"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Rata-rata Skor</div>
+</div>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+<div class="text-2xl font-extrabold text-green-600" x-text="passCount"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Lulus</div>
+</div>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+<div class="text-2xl font-extrabold text-red-500" x-text="failCount"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Tidak Lulus</div>
+</div>
+</div>
+</div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<div class="max-w-6xl mx-auto px-4 pb-16 flex gap-5">
+
+<!-- Left: Submissions table -->
+<div class="flex-1 min-w-0">
+
+<!-- Filters -->
+<div class="flex flex-col sm:flex-row gap-3 mb-4">
+<div class="relative flex-1">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+<input type="text" x-model="search" placeholder="Cari nama atau NIM..."
+class="q-input pl-9 dark:bg-gray-800 dark:border-gray-700 dark:text-white">
+</div>
+<select x-model="sortBy" class="q-input w-auto dark:bg-gray-800 dark:border-gray-700 dark:text-white text-sm">
+<option value="newest">Terbaru</option>
+<option value="oldest">Terlama</option>
+<option value="score_high">Skor Tertinggi</option>
+<option value="score_low">Skor Terendah</option>
+<option value="name">Nama A-Z</option>
+</select>
+</div>
+
+<!-- Empty state -->
+<div x-show="!loading && submissions.length === 0" class="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
+<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 mb-3">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+</div>
+<p class="text-sm font-semibold text-gray-600 dark:text-gray-400">Belum ada pengerjaan</p>
+<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Bagikan link quiz ke mahasiswa</p>
+<div x-show="quiz.status === 'open'" class="mt-4">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-xs font-semibold border border-green-200 dark:border-green-800 rounded-xl">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+<a :href="'/quiz/take?id=' + quizId" target="_blank" x-text="location.origin + '/quiz/take?id=' + quizId"></a>
+</div>
+</div>
+</div>
+
+<!-- Table -->
+<div x-show="filteredSubs.length > 0" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+<table class="w-full text-sm">
+<thead>
+<tr class="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+<th class="text-left px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">#</th>
+<th class="text-left px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nama</th>
+<th class="text-left px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider hide-mobile">NIM</th>
+<th class="text-center px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Skor</th>
+<th class="text-center px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider hide-mobile">Status</th>
+<th class="text-center px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider hide-mobile">Waktu</th>
+<th class="text-left px-4 py-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider hide-mobile">Tanggal</th>
+<th class="px-4 py-3"></th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+<template x-for="(s, i) in filteredSubs" :key="s.id">
+<tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer"
+@click="openDetail(s)">
+<td class="px-4 py-3 text-xs text-gray-400 dark:text-gray-500" x-text="i + 1"></td>
+<td class="px-4 py-3">
+<div class="font-semibold text-gray-800 dark:text-white text-sm line-clamp-1" x-text="s.name"></div>
+</td>
+<td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 hide-mobile" x-text="s.nim || '-'"></td>
+<td class="px-4 py-3 text-center">
+<div class="inline-flex flex-col items-center">
+<span class="text-sm font-bold" :class="s.percentage >= 80 ? 'text-green-600' : s.percentage >= 60 ? 'text-amber-600' : 'text-red-500'" x-text="Math.round(s.percentage) + '%'"></span>
+<span class="text-xs text-gray-400 dark:text-gray-500" x-text="s.score + '/' + s.total"></span>
+</div>
+</td>
+<td class="px-4 py-3 text-center hide-mobile">
+<span x-show="quiz.settings?.passingScore > 0"
+:class="s.passed ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'"
+class="text-xs font-bold px-2 py-0.5 rounded-full"
+x-text="s.passed ? 'Lulus' : 'Gagal'"></span>
+<span x-show="!quiz.settings?.passingScore" class="text-xs text-gray-400">-</span>
+</td>
+<td class="px-4 py-3 text-center text-xs text-gray-500 dark:text-gray-400 hide-mobile" x-text="formatTime(s.time_taken)"></td>
+<td class="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 hide-mobile" x-text="formatDate(s.submitted_at)"></td>
+<td class="px-4 py-3" @click.stop>
+<button @click="confirmDeleteSub(s)"
+class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+</button>
+</td>
+</tr>
+</template>
+</tbody>
+</table>
+</div>
+</div>
+
+<!-- Right: Score distribution -->
+<div class="w-64 flex-shrink-0 space-y-4 hide-mobile">
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-4 sticky top-20">
+<h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">Distribusi Skor</h3>
+
+<template x-for="band in scoreBands" :key="band.label">
+<div class="mb-3">
+<div class="flex justify-between text-xs mb-1">
+<span class="font-semibold" :class="band.color" x-text="band.label"></span>
+<span class="text-gray-500 dark:text-gray-400" x-text="band.count + ' orang'"></span>
+</div>
+<div class="progress-track">
+<div class="progress-fill" :style="'width:' + (submissions.length ? (band.count/submissions.length*100) : 0) + '%; background:' + band.bg"></div>
+</div>
+</div>
+</template>
+
+<div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 space-y-2 text-xs">
+<div class="flex justify-between">
+<span class="text-gray-500 dark:text-gray-400">Tertinggi:</span>
+<span class="font-bold text-green-600" x-text="maxScore + '%'"></span>
+</div>
+<div class="flex justify-between">
+<span class="text-gray-500 dark:text-gray-400">Terendah:</span>
+<span class="font-bold text-red-500" x-text="minScore + '%'"></span>
+</div>
+<div class="flex justify-between">
+<span class="text-gray-500 dark:text-gray-400">Rata-rata:</span>
+<span class="font-bold text-purple-600" x-text="avgScore + '%'"></span>
+</div>
+</div>
+
+<!-- Quiz link -->
+<div x-show="quiz.status === 'open'" class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+<p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Link Mahasiswa</p>
+<div class="flex gap-1.5">
+<input type="text" :value="location.origin + '/quiz/take?id=' + quizId" readonly
+class="q-input flex-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-white cursor-pointer" @click="copyLink()">
+<button @click="copyLink()" class="px-2 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-xs font-semibold hover:bg-purple-200 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ===== DETAIL MODAL ===== -->
+<div x-show="detailSub" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" @click.self="detailSub=null">
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" x-transition>
+<div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between z-10">
+<div>
+<h3 class="font-bold text-gray-800 dark:text-white" x-text="detailSub?.name"></h3>
+<p class="text-xs text-gray-500 dark:text-gray-400" x-text="(detailSub?.nim ? 'NIM: ' + detailSub?.nim + ' · ' : '') + formatDate(detailSub?.submitted_at)"></p>
+</div>
+<div class="flex items-center gap-3">
+<div class="text-right">
+<div class="text-xl font-extrabold" :class="detailSub?.percentage >= 80 ? 'text-green-600' : detailSub?.percentage >= 60 ? 'text-amber-600' : 'text-red-500'" x-text="Math.round(detailSub?.percentage || 0) + '%'"></div>
+<div class="text-xs text-gray-400" x-text="(detailSub?.score || 0) + '/' + (detailSub?.total || 0) + ' poin'"></div>
+</div>
+<button @click="detailSub=null" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+</button>
+</div>
+</div>
+
+<div x-show="loadingDetail" class="flex justify-center py-12">
+<svg class="animate-spin h-6 w-6 text-purple-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+</div>
+
+<div x-show="!loadingDetail && detailData" class="p-6 space-y-4">
+<template x-for="(q, qi) in detailData?.quiz?.questions || []" :key="q.id">
+<div class="rounded-xl border overflow-hidden"
+:class="detailData.submission.answers[q.id]?.correct ? 'border-green-300 dark:border-green-700' : 'border-red-300 dark:border-red-700'">
+<div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold"
+:class="detailData.submission.answers[q.id]?.correct ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+<path x-show="detailData.submission.answers[q.id]?.correct" fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+<path x-show="!detailData.submission.answers[q.id]?.correct" fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+</svg>
+<span x-text="'Soal ' + (qi+1)"></span>
+<span class="ml-auto" x-text="(detailData.submission.answers[q.id]?.earned || 0) + '/' + q.points + ' poin'"></span>
+</div>
+<div class="p-4">
+<p class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2" x-text="q.text"></p>
+<p class="text-xs text-gray-500 dark:text-gray-400">
+Jawaban: <span class="font-semibold text-gray-700 dark:text-gray-300" x-text="getAnswerDisplay(q, detailData.submission.answers[q.id]?.answer)"></span>
+</p>
+<p x-show="!detailData.submission.answers[q.id]?.correct && q.type !== 'essay'" class="text-xs text-green-600 dark:text-green-400 mt-0.5">
+Benar: <span class="font-semibold" x-text="getCorrectDisplay(q)"></span>
+</p>
+</div>
+</div>
+</template>
+</div>
+</div>
+</div>
+
+<!-- ===== DELETE CONFIRM ===== -->
+<div x-show="deleteSubTarget" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" @click.self="deleteSubTarget=null">
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" x-transition>
+<h3 class="font-bold text-gray-800 dark:text-white mb-2">Hapus pengerjaan ini?</h3>
+<p class="text-sm text-gray-500 dark:text-gray-400 mb-5" x-text="deleteSubTarget?.name + ' — ' + Math.round(deleteSubTarget?.percentage||0) + '%'"></p>
+<div class="flex gap-3">
+<button @click="deleteSubTarget=null" class="flex-1 py-2.5 text-sm font-semibold border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">Batal</button>
+<button @click="doDeleteSub()" class="flex-1 py-2.5 text-sm font-semibold bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all">Hapus</button>
+</div>
+</div>
+</div>
+
+<!-- Toast -->
+<div id="toast-root" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+<script>
+const QUIZ_ID = new URLSearchParams(location.search).get('quiz_id');
+
+function resultsPage() {
+return {
+loading: true,
+quizId: QUIZ_ID,
+quiz: {},
+submissions: [],
+search: '',
+sortBy: 'newest',
+detailSub: null,
+detailData: null,
+loadingDetail: false,
+deleteSubTarget: null,
+
+get filteredSubs() {
+let list = this.submissions.filter(s => {
+const q = this.search.toLowerCase();
+return !q || s.name.toLowerCase().includes(q) || (s.nim||'').toLowerCase().includes(q);
+});
+switch (this.sortBy) {
+case 'oldest':    list.sort((a,b) => a.submitted_at.localeCompare(b.submitted_at)); break;
+case 'score_high':list.sort((a,b) => b.percentage - a.percentage); break;
+case 'score_low': list.sort((a,b) => a.percentage - b.percentage); break;
+case 'name':      list.sort((a,b) => a.name.localeCompare(b.name)); break;
+default:          list.sort((a,b) => b.submitted_at.localeCompare(a.submitted_at));
+}
+return list;
+},
+
+get avgScore() {
+if (!this.submissions.length) return 0;
+return Math.round(this.submissions.reduce((s,x) => s + x.percentage, 0) / this.submissions.length);
+},
+
+get maxScore() {
+if (!this.submissions.length) return 0;
+return Math.round(Math.max(...this.submissions.map(s => s.percentage)));
+},
+
+get minScore() {
+if (!this.submissions.length) return 0;
+return Math.round(Math.min(...this.submissions.map(s => s.percentage)));
+},
+
+get passCount() {
+return this.submissions.filter(s => s.passed).length;
+},
+
+get failCount() {
+return this.submissions.filter(s => !s.passed).length;
+},
+
+get scoreBands() {
+const count = (min, max) => this.submissions.filter(s => s.percentage >= min && s.percentage < max).length;
+return [
+{ label: '90-100%', count: this.submissions.filter(s => s.percentage >= 90).length, color: 'text-green-600', bg: '#22c55e' },
+{ label: '75-89%',  count: count(75, 90),  color: 'text-teal-600',  bg: '#14b8a6' },
+{ label: '60-74%',  count: count(60, 75),  color: 'text-amber-600', bg: '#f59e0b' },
+{ label: '40-59%',  count: count(40, 60),  color: 'text-orange-600',bg: '#f97316' },
+{ label: '0-39%',   count: count(0, 40),   color: 'text-red-600',   bg: '#ef4444' },
+];
+},
+
+async init() {
+const dark = localStorage.getItem('darkMode') === 'enabled';
+if (dark) document.documentElement.classList.add('dark');
+
+if (!QUIZ_ID) { this.loading = false; return; }
+
+await Promise.all([this.loadQuiz(), this.loadSubmissions()]);
+this.loading = false;
+},
+
+async loadQuiz() {
+try {
+const res = await fetch('/api/quiz?action=get_quiz&id=' + QUIZ_ID);
+const data = await res.json();
+if (data.ok) this.quiz = data.quiz;
+} catch(e) {}
+},
+
+async loadSubmissions() {
+try {
+const res = await fetch('/api/quiz?action=list_submissions&quiz_id=' + QUIZ_ID);
+const data = await res.json();
+if (data.ok) this.submissions = data.submissions;
+} catch(e) {}
+},
+
+async openDetail(s) {
+this.detailSub = s;
+this.detailData = null;
+this.loadingDetail = true;
+try {
+const res = await fetch(`/api/quiz?action=get_submission&quiz_id=${QUIZ_ID}&sub_id=${s.id}`);
+const data = await res.json();
+if (data.ok) this.detailData = data;
+} catch(e) {}
+this.loadingDetail = false;
+},
+
+confirmDeleteSub(s) { this.deleteSubTarget = s; },
+
+async doDeleteSub() {
+if (!this.deleteSubTarget) return;
+const res = await fetch('/api/quiz?action=delete_submission', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ quiz_id: QUIZ_ID, sub_id: this.deleteSubTarget.id }),
+});
+const data = await res.json();
+if (data.ok) {
+this.submissions = this.submissions.filter(s => s.id !== this.deleteSubTarget.id);
+this.toast('Pengerjaan dihapus', 'success');
+}
+this.deleteSubTarget = null;
+},
+
+exportExcel() {
+if (!this.submissions.length) { this.toast('Tidak ada data', 'warning'); return; }
+const rows = [['No','Nama','NIM','Skor (%)','Poin','Total Poin','Status','Waktu (detik)','Tanggal Submit']];
+this.submissions.forEach((s, i) => {
+rows.push([
+i + 1, s.name, s.nim || '', Math.round(s.percentage), s.score, s.total,
+s.passed ? 'Lulus' : 'Tidak Lulus', s.time_taken || 0, s.submitted_at,
+]);
+});
+const wb = XLSX.utils.book_new();
+const ws = XLSX.utils.aoa_to_sheet(rows);
+ws['!cols'] = [{wch:4},{wch:30},{wch:15},{wch:10},{wch:8},{wch:10},{wch:12},{wch:14},{wch:22}];
+XLSX.utils.book_append_sheet(wb, ws, 'Hasil');
+XLSX.writeFile(wb, 'hasil_' + (this.quiz.title||'quiz').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
+this.toast('Diekspor!', 'success');
+},
+
+copyLink() {
+const url = location.origin + '/quiz/take?id=' + QUIZ_ID;
+navigator.clipboard.writeText(url).then(() => this.toast('Link disalin!', 'success'));
+},
+
+formatTime(secs) {
+if (!secs) return '-';
+const m = Math.floor(secs / 60), s = secs % 60;
+return m > 0 ? `${m}m ${s}s` : `${s}s`;
+},
+
+formatDate(iso) {
+if (!iso) return '-';
+return new Date(iso).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+},
+
+getAnswerDisplay(q, ans) {
+if (ans === undefined || ans === null || ans === '') return '(tidak dijawab)';
+if (['multiple_choice','dropdown'].includes(q.type)) return q.options?.[ans]?.text || ans;
+if (q.type === 'checkbox') return Array.isArray(ans) ? ans.map(i => q.options?.[i]?.text || i).join(', ') : ans;
+if (q.type === 'true_false') return ans === 'true' ? 'Benar' : 'Salah';
+return String(ans);
+},
+
+getCorrectDisplay(q) {
+if (['multiple_choice','dropdown'].includes(q.type)) return q.correctAnswer !== null ? (q.options?.[q.correctAnswer]?.text || '-') : '-';
+if (q.type === 'checkbox') return (q.correctAnswers||[]).map(i => q.options?.[i]?.text || i).join(', ');
+if (q.type === 'true_false') return q.correctAnswer === 'true' ? 'Benar' : 'Salah';
+return q.correctAnswer || '-';
+},
+
+toast(msg, type = 'info') {
+const root = document.getElementById('toast-root');
+const colors = { success:'bg-green-100 dark:bg-green-800/90 border-green-300 text-green-800 dark:text-green-100', error:'bg-red-100 dark:bg-red-800/90 border-red-300 text-red-800 dark:text-red-100', info:'bg-blue-100 dark:bg-blue-800/90 border-blue-300 text-blue-800 dark:text-blue-100', warning:'bg-amber-100 dark:bg-amber-800/90 border-amber-300 text-amber-800 dark:text-amber-100' };
+const t = document.createElement('div');
+t.className = `toast-item flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium max-w-xs ${colors[type]||colors.info}`;
+t.innerHTML = `<span>${msg}</span>`;
+root.appendChild(t);
+requestAnimationFrame(() => t.classList.add('show'));
+setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 3500);
+},
+};
+}
+</script>

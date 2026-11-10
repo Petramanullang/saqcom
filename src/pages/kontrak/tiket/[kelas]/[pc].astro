@@ -1,0 +1,30 @@
+---
+import '../../../../styles/global.css';
+import '../../../../styles/kontrak-tiket.css';
+import tpl from '../../../../legacy/kontrak-tiket.html?raw';
+import { getKelasKontrak, getKursi, hashTiket, isiTemplate } from '../../../../lib/kontrak';
+import { fmtWaktu } from '../../../../lib/util';
+
+const kelas = getKelasKontrak(String(Astro.params.kelas));
+const pc = Number(Astro.params.pc);
+const k = kelas ? getKursi(kelas.id, pc) : undefined;
+if (!kelas || !k) return Astro.redirect('/kontrak');
+
+const html = isiTemplate(tpl, {
+  NAMA: k.nama, NIM: k.nim, MK: kelas.mk, KELAS: kelas.nama, PC: pc,
+  WAKTU: fmtWaktu(k.waktu_kontrak), HASH: hashTiket(k.nim, k.waktu_kontrak), LOKASI: Astro.locals.settings.lokasiLab,
+});
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boarding Pass SAQ - PC {pc}</title>
+    <link rel="icon" type="image/webp" href="/img/lab-saql.webp" />
+    <script is:inline src="/vendor/html2pdf.bundle.min.js"></script>
+    <script is:inline src="/vendor/sweetalert2.min.js"></script>
+  </head>
+  <body class="min-h-screen flex flex-col items-center justify-center p-4 md:p-6 overflow-x-hidden">
+    <Fragment set:html={html} />
+  </body>
+</html>

@@ -1,0 +1,386 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { all, get, run, tx } from '../../lib/db';
+import {
+  HARI, listSemester, semesterAktif, listJadwal, getJadwal, listAsisten, jamSelesai, labelKelas, normalJam,
+  aktifkanSemester, buatSemester, imporJadwal, setAsistenJadwal, cariAtauBuatAsisten, cariAtauBuatDosen, sinkronKelasTugas,
+  pecahMatkul, cariAtauBuatMatkul, type BarisImpor,
+} from '../../lib/jadwal';
+import { flashUrl, str, int, nowWib, todayWib, fmtTanggalPanjang } from '../../lib/util';
+
+const url = Astro.url;
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const aksi = str(f.get('aksi'));
+  const sid = int(f.get('semester_id'));
+  const back = `/admin/jadwal${sid ? `?semester=${sid}` : ''}`;
+  const ok = (m: string, u = back) => Astro.redirect(flashUrl(u, 'ok', m));
+  const err = (m: string, u = back) => Astro.redirect(flashUrl(u, 'err', m));
+  try {
+    switch (aksi) {
+      case 'semester_baru': {
+        const nama = str(f.get('nama')).replace(/\s+/g, ' ');
+        if (nama.length < 4) return err('Nama semester wajib diisi, contoh: Genap 2026/2027.');
+        if (get('SELECT 1 FROM semester WHERE nama = ?', nama)) return err('Semester dengan nama itu sudah ada.');
+        const id = buatSemester(nama, int(f.get('salin_dari')) || null);
+        if (f.get('aktifkan')) aktifkanSemester(id);
+        return ok(`Semester ${nama} dibuat.`, `/admin/jadwal?semester=${id}`);
+      }
+      case 'semester_aktif':
+        aktifkanSemester(sid);
+        return ok('Semester aktif diganti. Semua dropdown kelas sekarang memakai jadwal semester ini.');
+      case 'semester_ganti_nama':
+        run('UPDATE semester SET nama = ? WHERE id = ?', str(f.get('nama')), sid);
+        sinkronKelasTugas();
+        return ok('Nama semester diperbarui.');
+      case 'semester_hapus': {
+        if (get<{ aktif: number }>('SELECT aktif FROM semester WHERE id = ?', sid)?.aktif) return err('Semester aktif tidak bisa dihapus. Aktifkan semester lain dulu.');
+        if (str(f.get('konfirmasi')).toUpperCase() !== 'HAPUS') return err('Ketik HAPUS untuk konfirmasi.');
+        run('DELETE FROM semester WHERE id = ?', sid);
+        sinkronKelasTugas();
+        return ok('Semester dan jadwalnya dihapus. (Tugas & kontrak yang sudah masuk tetap tersimpan.)', '/admin/jadwal');
+      }
+      case 'jadwal_simpan': {
+        const jid = int(f.get('jadwal_id'));
+        const hari = int(f.get('hari'));
+        const jam = normalJam(str(f.get('jam')));
+        const kelas = str(f.get('kelas')).toUpperCase();
+        const sks = int(f.get('sks'), 2);
+        let matkulId = int(f.get('matkul_id'));
+        if (!matkulId && str(f.get('matkul_baru'))) {
+          const p = pecahMatkul(str(f.get('matkul_baru')));
+          matkulId = cariAtauBuatMatkul(p.nama, str(f.get('jurusan_baru')) || p.jurusan || 'TI', sks);
+        }
+        let dosenId: number | null = int(f.get('dosen_id')) || null;
+        if (!dosenId && str(f.get('dosen_baru'))) dosenId = cariAtauBuatDosen(str(f.get('dosen_baru')));
+        if (!hari || !jam || !kelas || !matkulId) return err('Hari, jam, mata kuliah, dan kelas wajib diisi.');
+        const asisten = [0, 1, 2, 3].map((i) => cariAtauBuatAsisten(str(f.get(`asisten_${i}`))));
+        tx(() => {
+          let id = jid;
+          if (jid) run('UPDATE jadwal SET hari = ?, jam_mulai = ?, matkul_id = ?, dosen_id = ?, kelas = ?, sks = ? WHERE id = ?', hari, jam, matkulId, dosenId, kelas, sks, jid);
+          else id = Number(run('INSERT INTO jadwal(semester_id, hari, jam_mulai, matkul_id, dosen_id, kelas, sks) VALUES (?,?,?,?,?,?,?)', sid, hari, jam, matkulId, dosenId, kelas, sks).lastInsertRowid);
+          setAsistenJadwal(id, asisten);
+        });
+        sinkronKelasTugas();
+        return ok(jid ? 'Jadwal diperbarui.' : 'Jadwal ditambahkan.');
+      }
+      case 'jadwal_hapus':
+        run('DELETE FROM jadwal WHERE id = ?', int(f.get('jadwal_id')));
+        sinkronKelasTugas();
+        return ok('Jadwal dihapus.');
+      case 'impor': {
+        let rows: BarisImpor[] = [];
+        try { rows = JSON.parse(str(f.get('rows_json'))); } catch { return err('Data Excel tidak terbaca.'); }
+        if (!rows.length) return err('Tidak ada baris jadwal yang terbaca dari file.');
+        let target = sid;
+        const namaBaru = str(f.get('semester_baru'));
+        if (namaBaru) {
+          const ada = get<{ id: number }>('SELECT id FROM semester WHERE nama = ?', namaBaru);
+          target = ada?.id ?? buatSemester(namaBaru);
+        }
+        if (!target) return err('Pilih atau buat semester tujuan.');
+        const h = imporJadwal(target, rows, !!f.get('ganti'));
+        if (f.get('aktifkan')) aktifkanSemester(target);
+        return ok(`${h.n} jadwal diimpor.${h.pesan.length ? ' ' + h.pesan.join(' ') : ''}`, `/admin/jadwal?semester=${target}`);
+      }
+      case 'pengganti_simpan': {
+        const jid = int(f.get('jadwal_id'));
+        const tanggal = str(f.get('tanggal'));
+        const jam = normalJam(str(f.get('jam')));
+        if (!getJadwal(jid) || !/^\d{4}-\d{2}-\d{2}$/.test(tanggal) || !jam) return err('Lengkapi kelas, tanggal, dan jam pengganti.', back + '#pengganti');
+        run('INSERT INTO jadwal_pengganti(jadwal_id, tanggal, jam_mulai, ganti_reguler, keterangan, created_at) VALUES (?,?,?,?,?,?)',
+          jid, tanggal, jam, f.get('ganti_reguler') ? 1 : 0, str(f.get('keterangan')).slice(0, 120), nowWib());
+        return ok('Kelas pengganti dicatat. Pada tanggal itu kelas ini otomatis jadi pilihan default.', back + '#pengganti');
+      }
+      case 'pengganti_hapus':
+        run('DELETE FROM jadwal_pengganti WHERE id = ?', int(f.get('id')));
+        return ok('Kelas pengganti dihapus.', back + '#pengganti');
+    }
+  } catch (e: any) {
+    if (String(e?.message).includes('UNIQUE')) return err('Data bentrok dengan yang sudah ada (nama ganda).');
+    throw e;
+  }
+  return Astro.redirect(back);
+}
+
+const semesters = listSemester();
+const aktif = semesterAktif();
+const sid = int(url.searchParams.get('semester')) || aktif?.id || semesters[0]?.id || 0;
+const sem = semesters.find((s) => s.id === sid);
+const jadwal = sem ? listJadwal(sem.id) : [];
+const perHari = HARI.map((_, h) => jadwal.filter((j) => j.hari === h));
+const matkul = all<{ id: number; nama_matkul: string; jurusan: string }>('SELECT id, nama_matkul, jurusan FROM matkul ORDER BY nama_matkul, jurusan');
+const dosen = all<{ id: number; nama_dosen: string }>('SELECT id, nama_dosen FROM dosen ORDER BY nama_dosen');
+const asisten = listAsisten();
+const today = todayWib();
+const pengganti = all<{ id: number; jadwal_id: number; tanggal: string; jam_mulai: string; ganti_reguler: number; keterangan: string }>(
+  'SELECT p.* FROM jadwal_pengganti p JOIN jadwal j ON j.id = p.jadwal_id WHERE j.semester_id = ? AND p.tanggal >= ? ORDER BY p.tanggal, p.jam_mulai', sid, today);
+const jadwalMap = new Map(jadwal.map((j) => [j.id, j]));
+const hitung = (sql: string) => get<{ c: number }>(sql, sid)!.c;
+const ringkas = sem ? {
+  matkul: hitung('SELECT COUNT(DISTINCT matkul_id) c FROM jadwal WHERE semester_id = ?'),
+  dosen: hitung('SELECT COUNT(DISTINCT dosen_id) c FROM jadwal WHERE semester_id = ?'),
+  asisten: hitung('SELECT COUNT(DISTINCT x.asisten_id) c FROM jadwal_asisten x JOIN jadwal j ON j.id = x.jadwal_id WHERE j.semester_id = ?'),
+} : { matkul: 0, dosen: 0, asisten: 0 };
+const ekspor = jadwal.map((j) => ({ HARI: HARI[j.hari].toUpperCase(), JAM: j.jam_mulai, 'MATA KULIAH': `${j.nama_matkul} (${j.jurusan})`, DOSEN: j.nama_dosen ?? '', KELAS: j.kelas, SKS: j.sks, PJ: j.asisten[0] ?? '', '1': j.asisten[1] ?? '', '2': j.asisten[2] ?? '', '3': j.asisten[3] ?? '' }));
+const formKosong = { id: 0, hari: 1, jam: '', matkul_id: '', dosen_id: '', kelas: '', sks: 3, asisten: ['', '', '', ''] };
+---
+<AdminLayout title="Jadwal Semester" active="jadwal" alpine width="full" scripts={['/vendor/xlsx.full.min.js']}>
+  <script is:inline type="application/json" id="ekspor-data" set:html={JSON.stringify({ nama: sem?.nama ?? 'jadwal', rows: ekspor }).replace(/</g, '\\u003c')}></script>
+  <div class="max-w-[1500px] mx-auto" x-data="jadwalPage" x-cloak>
+    <!-- Pilih semester -->
+    <div class="flex flex-wrap items-center gap-2 mb-5">
+      {semesters.map((s) => (
+        <a href={`?semester=${s.id}`} class:list={['px-4 py-2 rounded-xl text-sm font-bold border transition', s.id === sid ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-400']}>
+          {s.nama}{s.aktif ? <span class="ml-2 badge bg-emerald-500 text-white">AKTIF</span> : null}
+        </a>
+      ))}
+      <button type="button" class="btn btn-ghost" @click="modal = 'semester'"><Icon name="plus" /> Semester baru</button>
+      <div class="flex-1"></div>
+      <button type="button" class="btn btn-ghost" @click="modal = 'impor'"><Icon name="upload" /> Import Excel</button>
+      <button type="button" class="btn btn-ghost" @click="ekspor()" disabled={!jadwal.length}><Icon name="table" /> Export Excel</button>
+    </div>
+
+    {!sem && <div class="card p-12 text-center text-gray-500">Belum ada semester. Buat semester baru atau import jadwal dari Excel.</div>}
+    {sem && (
+      <>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+          <div class="card p-4 lg:col-span-2 flex items-center gap-3">
+            <div class="flex-1">
+              <p class="label !mb-0.5">Semester</p>
+              <p class="text-lg font-black">{sem.nama}</p>
+              <p class="text-xs text-gray-500">{sem.aktif ? 'Dipakai semua dropdown kelas saat ini' : 'Tidak aktif — hanya arsip / persiapan'}</p>
+            </div>
+            {!sem.aktif && (
+              <form method="post"><input type="hidden" name="aksi" value="semester_aktif" /><input type="hidden" name="semester_id" value={sem.id} />
+                <button class="btn btn-success btn-sm"><Icon name="check" class="w-3.5 h-3.5" /> Jadikan aktif</button></form>
+            )}
+            <details class="relative" data-dropdown>
+              <summary class="list-none cursor-pointer p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"><Icon name="cog" /></summary>
+              <div class="absolute right-0 mt-1 w-72 p-3 card z-20 space-y-3">
+                <form method="post" class="flex gap-2"><input type="hidden" name="aksi" value="semester_ganti_nama" /><input type="hidden" name="semester_id" value={sem.id} />
+                  <input name="nama" value={sem.nama} class="input !py-1.5" /><button class="btn btn-sm btn-primary">Ubah</button></form>
+                {!sem.aktif && (
+                  <form method="post" onsubmit="const k = prompt('Hapus semester beserta seluruh jadwalnya? Ketik HAPUS:'); if (k === null) return false; this.konfirmasi.value = k;">
+                    <input type="hidden" name="aksi" value="semester_hapus" /><input type="hidden" name="semester_id" value={sem.id} /><input type="hidden" name="konfirmasi" />
+                    <button class="btn btn-sm w-full text-red-600 border border-red-200 hover:bg-red-50"><Icon name="trash" class="w-3.5 h-3.5" /> Hapus semester</button></form>
+                )}
+              </div>
+            </details>
+          </div>
+          <div class="card p-4"><p class="label !mb-0.5">Jadwal kelas</p><p class="text-2xl font-black">{jadwal.length}</p></div>
+          <div class="card p-4"><p class="label !mb-0.5">Matkul · Dosen</p><p class="text-2xl font-black">{ringkas.matkul} <span class="text-gray-400 text-base">·</span> {ringkas.dosen}</p></div>
+          <div class="card p-4"><p class="label !mb-0.5">Asisten terlibat</p><p class="text-2xl font-black">{ringkas.asisten}</p></div>
+        </div>
+
+        <!-- Tabel jadwal ala Excel -->
+        <div class="card overflow-hidden mb-6">
+          <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-700">
+            <h2 class="font-extrabold">Jadwal Ngawas Lab SAQ — {sem.nama}</h2>
+            <button type="button" class="btn btn-primary btn-sm" @click="tambah()"><Icon name="plus" class="w-3.5 h-3.5" /> Tambah jadwal</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[1100px] text-sm">
+              <thead class="bg-slate-800 text-white">
+                <tr>
+                  <th class="px-3 py-2.5 text-left text-xs font-bold uppercase">Hari</th><th class="px-3 py-2.5 text-left text-xs font-bold uppercase">Jam</th>
+                  <th class="px-3 py-2.5 text-left text-xs font-bold uppercase">Mata Kuliah</th><th class="px-3 py-2.5 text-left text-xs font-bold uppercase">Dosen</th>
+                  <th class="px-3 py-2.5 text-center text-xs font-bold uppercase">Kelas</th><th class="px-3 py-2.5 text-center text-xs font-bold uppercase">SKS</th>
+                  <th class="px-3 py-2.5 text-left text-xs font-bold uppercase bg-slate-700">PJ</th><th class="px-3 py-2.5 text-left text-xs font-bold uppercase bg-slate-700">1</th>
+                  <th class="px-3 py-2.5 text-left text-xs font-bold uppercase bg-slate-700">2</th><th class="px-3 py-2.5 text-left text-xs font-bold uppercase bg-slate-700">3</th>
+                  <th class="px-3 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {jadwal.length === 0 && <tr><td colspan="11" class="p-10 text-center text-gray-500">Belum ada jadwal di semester ini.</td></tr>}
+                {perHari.map((list, h) => list.map((j, i) => (
+                  <tr class:list={['border-b border-gray-100 dark:border-gray-700/60 hover:bg-blue-50/40 dark:hover:bg-blue-900/10', i === 0 && 'border-t-2 border-t-slate-300 dark:border-t-slate-600']}>
+                    {i === 0 && <td rowspan={list.length} class="px-3 py-2 font-black text-center align-middle bg-gray-50 dark:bg-gray-900/40 uppercase text-xs tracking-wider">{HARI[h]}</td>}
+                    <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{j.jam_mulai}<span class="text-gray-400">–{jamSelesai(j)}</span></td>
+                    <td class="px-3 py-2"><span class="font-semibold">{j.nama_matkul}</span> <span class:list={['badge', j.jurusan === 'SI' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300']}>{j.jurusan}</span></td>
+                    <td class="px-3 py-2 text-xs">{j.nama_dosen ?? '-'}</td>
+                    <td class="px-3 py-2 text-center font-black">{j.kelas}</td>
+                    <td class="px-3 py-2 text-center">{j.sks}</td>
+                    {j.asisten.map((a, k) => <td class:list={['px-3 py-2 text-xs', k === 0 ? 'font-bold' : '']}>{a ?? ''}</td>)}
+                    <td class="px-3 py-2 text-right whitespace-nowrap">
+                      <button type="button" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer" title="Edit"
+                        @click={`edit(${JSON.stringify({ id: j.id, hari: j.hari, jam: j.jam_mulai, matkul_id: String(j.matkul_id), dosen_id: j.dosen_id ? String(j.dosen_id) : '', kelas: j.kelas, sks: j.sks, asisten: j.asisten.map((x) => x ?? '') })})`}><Icon name="pencil" class="w-3.5 h-3.5" /></button>
+                      <form method="post" class="inline" onsubmit="return confirm('Hapus jadwal ini? Kelas upload terkait akan disembunyikan.')">
+                        <input type="hidden" name="aksi" value="jadwal_hapus" /><input type="hidden" name="semester_id" value={sid} /><input type="hidden" name="jadwal_id" value={j.id} />
+                        <button class="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer" title="Hapus"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+                    </td>
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          </div>
+          <p class="px-5 py-3 text-xs text-gray-500 border-t border-gray-100 dark:border-gray-700">Jam selesai dihitung otomatis: SKS × 50 menit. Kelas dianggap "sedang berjalan" sampai 30 menit setelah jam selesai.</p>
+        </div>
+
+        <!-- Kelas pengganti -->
+        <div class="card p-5" id="pengganti">
+          <h2 class="font-extrabold flex items-center gap-2 mb-1"><Icon name="swap" /> Kelas Pengganti / Pindah Jam</h2>
+          <p class="text-xs text-gray-500 mb-4">Untuk kelas yang dipindah ke hari/jam lain. Pada tanggal itu, kelas ini otomatis jadi pilihan default di upload tugas, quiz, dan kontrak.</p>
+          <form method="post" class="grid md:grid-cols-12 gap-2 items-end p-3 rounded-2xl bg-gray-50 dark:bg-gray-900/40 mb-4">
+            <input type="hidden" name="aksi" value="pengganti_simpan" /><input type="hidden" name="semester_id" value={sid} />
+            <div class="md:col-span-4"><label class="label">Kelas</label>
+              <select name="jadwal_id" class="input" required><option value="">Pilih kelas…</option>
+                {jadwal.map((j) => <option value={j.id}>{HARI[j.hari]} {j.jam_mulai} · {labelKelas(j)}</option>)}</select></div>
+            <div class="md:col-span-2"><label class="label">Tanggal</label><input type="date" name="tanggal" min={today} value={today} class="input" required /></div>
+            <div class="md:col-span-2"><label class="label">Jam mulai</label><input type="time" name="jam" class="input" required /></div>
+            <div class="md:col-span-2"><label class="label">Keterangan</label><input name="keterangan" class="input" placeholder="Dosen berhalangan" /></div>
+            <div class="md:col-span-2"><button class="btn btn-primary w-full">Simpan</button></div>
+            <label class="md:col-span-12 flex items-center gap-2 text-xs"><input type="checkbox" name="ganti_reguler" checked class="accent-blue-600" /> <span>Jadwal reguler kelas ini di minggu yang sama ditiadakan (pindah jam, bukan tambahan)</span></label>
+          </form>
+          {pengganti.length === 0 ? <p class="text-sm text-gray-500">Tidak ada kelas pengganti yang akan datang.</p> : (
+            <div class="divide-y divide-gray-100 dark:divide-gray-700">
+              {pengganti.map((p) => { const j = jadwalMap.get(p.jadwal_id)!; return (
+                <div class="py-2.5 flex flex-wrap items-center gap-3 text-sm">
+                  <span class="badge bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{fmtTanggalPanjang(p.tanggal)} · {p.jam_mulai}</span>
+                  <span class="flex-1 font-semibold">{labelKelas(j)} <span class="text-xs text-gray-400 font-normal">(reguler: {HARI[j.hari]} {j.jam_mulai}{p.ganti_reguler ? ', ditiadakan' : ''})</span></span>
+                  {p.keterangan && <span class="text-xs text-gray-500 italic">{p.keterangan}</span>}
+                  <form method="post"><input type="hidden" name="aksi" value="pengganti_hapus" /><input type="hidden" name="semester_id" value={sid} /><input type="hidden" name="id" value={p.id} />
+                    <button class="p-1 text-gray-400 hover:text-red-500 cursor-pointer"><Icon name="x" class="w-4 h-4" /></button></form>
+                </div>
+              ); })}
+            </div>
+          )}
+        </div>
+      </>
+    )}
+
+    <datalist id="dl-asisten">{asisten.map((a) => <option value={a.nama} />)}</datalist>
+
+    <!-- ===== Modal ===== -->
+    <div x-show="modal" x-transition.opacity class="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" @click.self="modal = null" @keydown.escape.window="modal = null">
+      <!-- Tambah / edit jadwal -->
+      <form method="post" x-show="modal === 'jadwal'" class="card w-full max-w-2xl p-6 space-y-4 max-h-[92vh] overflow-y-auto">
+        <h3 class="font-extrabold text-lg" x-text="form.id ? 'Edit Jadwal' : 'Tambah Jadwal'"></h3>
+        <input type="hidden" name="aksi" value="jadwal_simpan" /><input type="hidden" name="semester_id" value={sid} /><input type="hidden" name="jadwal_id" :value="form.id" />
+        <div class="grid sm:grid-cols-4 gap-3">
+          <div><label class="label">Hari</label><select name="hari" class="input" x-model.number="form.hari">{HARI.slice(1).map((h, i) => <option value={i + 1}>{h}</option>)}</select></div>
+          <div><label class="label">Jam mulai</label><input type="time" name="jam" class="input" x-model="form.jam" required /></div>
+          <div><label class="label">Kelas</label><input name="kelas" class="input uppercase" x-model="form.kelas" maxlength="5" required placeholder="A" /></div>
+          <div><label class="label">SKS</label><input type="number" name="sks" min="1" max="6" class="input" x-model.number="form.sks" /></div>
+        </div>
+        <div>
+          <label class="label">Mata Kuliah</label>
+          <select name="matkul_id" class="input" x-model="form.matkul_id">
+            <option value="">+ Mata kuliah baru…</option>
+            {matkul.map((m) => <option value={String(m.id)}>{m.nama_matkul} ({m.jurusan})</option>)}
+          </select>
+          <div class="grid grid-cols-3 gap-2 mt-2" x-show="!form.matkul_id">
+            <input name="matkul_baru" class="input col-span-2" placeholder="Nama mata kuliah baru" />
+            <select name="jurusan_baru" class="input"><option value="TI">TI</option><option value="SI">SI</option><option value="SD">SD</option></select>
+          </div>
+        </div>
+        <div>
+          <label class="label">Dosen Pengampu</label>
+          <select name="dosen_id" class="input" x-model="form.dosen_id">
+            <option value="">+ Dosen baru…</option>
+            {dosen.map((d) => <option value={String(d.id)}>{d.nama_dosen}</option>)}
+          </select>
+          <input name="dosen_baru" class="input mt-2" x-show="!form.dosen_id" placeholder="Nama dosen baru, lengkap dengan gelar" />
+        </div>
+        <div>
+          <label class="label">Asisten (ketik nama; nama baru otomatis ditambahkan)</label>
+          <div class="grid sm:grid-cols-4 gap-2">
+            {['PJ', 'Asisten 1', 'Asisten 2', 'Asisten 3'].map((p, i) => (
+              <div><span class="text-[11px] font-bold text-gray-400">{p}</span><input name={`asisten_${i}`} list="dl-asisten" class="input" x-model={`form.asisten[${i}]`} autocomplete="off" /></div>
+            ))}
+          </div>
+        </div>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary">Simpan</button></div>
+      </form>
+
+      <!-- Semester baru -->
+      <form method="post" x-show="modal === 'semester'" class="card w-full max-w-md p-6 space-y-4">
+        <h3 class="font-extrabold text-lg">Semester Baru</h3>
+        <input type="hidden" name="aksi" value="semester_baru" />
+        <div><label class="label">Nama semester</label><input name="nama" class="input" required placeholder="Genap 2026/2027" /></div>
+        <div><label class="label">Salin jadwal dari (opsional)</label>
+          <select name="salin_dari" class="input"><option value="">— Mulai kosong —</option>{semesters.map((s) => <option value={s.id}>{s.nama}</option>)}</select></div>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="aktifkan" class="accent-blue-600" /> Langsung jadikan semester aktif</label>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary">Buat</button></div>
+      </form>
+
+      <!-- Import Excel -->
+      <form method="post" x-show="modal === 'impor'" class="card w-full max-w-2xl p-6 space-y-4 max-h-[92vh] overflow-y-auto">
+        <h3 class="font-extrabold text-lg">Import Jadwal dari Excel</h3>
+        <p class="text-sm text-gray-500">Format sama dengan file "Jadwal Ngawas Lab SAQ": kolom <b>HARI, JAM, MATA KULIAH, DOSEN, KELAS, SKS, PJ, 1, 2, 3</b>. Sel HARI yang di-merge tidak masalah. Mata kuliah berlabel <b>(SI)</b> masuk jurusan SI; tanpa label mengikuti data mata kuliah yang sudah ada (default TI).</p>
+        <input type="hidden" name="aksi" value="impor" /><input type="hidden" name="rows_json" :value="JSON.stringify(rows)" />
+        <div class="flex flex-wrap gap-2 items-center">
+          <input type="file" accept=".xlsx,.xls,.csv" @change="baca($event)" class="text-sm file:mr-2 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-gray-100 dark:file:bg-gray-700 file:font-semibold" />
+          <button type="button" class="btn btn-sm btn-ghost" @click="template()"><Icon name="download" class="w-3.5 h-3.5" /> Template</button>
+        </div>
+        <p class="text-sm" :class="rows.length ? 'text-emerald-600 font-semibold' : 'text-gray-500'" x-text="info"></p>
+        <div x-show="rows.length" class="max-h-56 overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
+          <table class="w-full text-xs"><tbody>
+            <template x-for="r in rows"><tr class="border-b border-gray-100 dark:border-gray-700"><td class="px-2 py-1" x-text="r.hari"></td><td class="px-2 py-1" x-text="r.jam"></td><td class="px-2 py-1" x-text="r.matkul"></td><td class="px-2 py-1" x-text="r.kelas"></td><td class="px-2 py-1" x-text="r.asisten.filter(Boolean).join(', ')"></td></tr></template>
+          </tbody></table>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-3">
+          <div><label class="label">Masukkan ke semester</label>
+            <select name="semester_id" class="input" x-model="tujuan"><option value="">+ Semester baru…</option>{semesters.map((s) => <option value={String(s.id)}>{s.nama}</option>)}</select></div>
+          <div x-show="!tujuan"><label class="label">Nama semester baru</label><input name="semester_baru" class="input" x-model="namaSemester" placeholder="Genap 2026/2027" /></div>
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="ganti" class="accent-blue-600" /> Hapus jadwal lama di semester tujuan sebelum import</label>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="aktifkan" class="accent-blue-600" /> Jadikan semester aktif setelah import</label>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary" :disabled="!rows.length">Import <span x-text="rows.length ? '(' + rows.length + ' baris)' : ''"></span></button></div>
+      </form>
+    </div>
+  </div>
+
+  <script is:inline define:vars={{ formKosong, sidAwal: sid ? String(sid) : '' }}>
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('jadwalPage', () => ({
+        modal: null, form: structuredClone(formKosong), rows: [], info: 'Pilih file Excel jadwal.', tujuan: sidAwal, namaSemester: '',
+        tambah() { this.form = structuredClone(formKosong); this.modal = 'jadwal'; },
+        edit(j) { this.form = { ...j, asisten: [...j.asisten] }; this.modal = 'jadwal'; },
+        baca(e) {
+          const file = e.target.files[0]; if (!file) return;
+          const r = new FileReader();
+          r.onload = (ev) => {
+            try {
+              const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+              const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+              const up = (v) => String(v ?? '').trim().toUpperCase();
+              // Judul → nama semester ("... GANJIL 2026/2027")
+              for (const row of data.slice(0, 5)) { const m = row.join(' ').match(/(GANJIL|GENAP)\s+(\d{4}\s*\/\s*\d{4})/i); if (m) { this.namaSemester = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() + ' ' + m[2].replace(/\s/g, ''); break; } }
+              const iHead = data.findIndex((row) => row.some((c) => /MATA\s*KULIAH/i.test(c)));
+              if (iHead < 0) { this.info = 'Kolom "MATA KULIAH" tidak ditemukan.'; this.rows = []; return; }
+              const heads = [data[iHead], data[iHead + 1] || []];
+              const col = (re) => { for (const h of heads) { const i = h.findIndex((c) => re.test(up(c))); if (i >= 0) return i; } return -1; };
+              const c = { hari: col(/^HARI$/), jam: col(/^JAM$/), mk: col(/MATA\s*KULIAH/), dosen: col(/DOSEN/), kelas: col(/^KELAS$/), sks: col(/^SKS$/), pj: col(/^PJ$/) };
+              const mulai = heads[1].some((x) => /^(HARI|JAM|PJ)$/.test(up(x))) ? iHead + 2 : iHead + 1;
+              const toJam = (v) => { const n = Number(v); if (v !== '' && !isNaN(n) && n < 1) { const m = Math.round(n * 1440); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); } return String(v).trim(); };
+              const out = [];
+              for (const row of data.slice(mulai)) {
+                const mk = String(row[c.mk] ?? '').trim();
+                if (!mk) continue;
+                const asisten = c.pj >= 0 ? [0, 1, 2, 3].map((k) => String(row[c.pj + k] ?? '').trim()) : [];
+                out.push({ hari: c.hari >= 0 ? String(row[c.hari]).trim() : '', jam: toJam(row[c.jam]), matkul: mk, dosen: String(row[c.dosen] ?? '').trim(), kelas: String(row[c.kelas] ?? '').trim(), sks: row[c.sks], asisten });
+              }
+              this.rows = out;
+              this.info = out.length ? `${out.length} baris jadwal terbaca dari ${file.name}.` : 'Tidak ada baris jadwal yang terbaca.';
+            } catch (err) { this.info = 'Gagal membaca file: ' + err.message; this.rows = []; }
+          };
+          r.readAsArrayBuffer(file);
+        },
+        template() {
+          const ws = XLSX.utils.aoa_to_sheet([['JADWAL NGAWAS LAB SAQ GENAP 2026/2027'], ['HARI', 'JAM', 'MATA KULIAH', 'DOSEN', 'KELAS', 'SKS', 'PJ', '1', '2', '3'],
+            ['SENIN', '10:10', 'ALGORITMA DAN PEMROGRAMAN I', 'Sely Karmila, S.Kom., M.Si', 'C', 3, 'LEWIS', 'ARIF', 'BULAN', 'TRIA'],
+            ['', '13:00', 'PEMROGRAMAN DASAR (SI)', 'Dr. Meilia Nur Indah S., ST., MKom', 'A', 3, 'DANIS', 'LEWIS', 'FIRA', '']]);
+          ws['!cols'] = [8, 7, 45, 38, 7, 5, 12, 12, 12, 12].map((w) => ({ wch: w }));
+          const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Jadwal'); XLSX.writeFile(wb, 'template_jadwal_saq.xlsx');
+        },
+        ekspor() {
+          const D = JSON.parse(document.getElementById('ekspor-data').textContent);
+          const ws = XLSX.utils.json_to_sheet(D.rows); ws['!cols'] = [8, 7, 48, 38, 7, 5, 12, 12, 12, 12].map((w) => ({ wch: w }));
+          const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Jadwal'); XLSX.writeFile(wb, 'Jadwal_SAQ_' + D.nama.replace(/[^\w]+/g, '_') + '.xlsx');
+        },
+      }));
+    });
+  </script>
+</AdminLayout>

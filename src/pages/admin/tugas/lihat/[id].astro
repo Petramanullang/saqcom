@@ -1,0 +1,87 @@
+---
+import fs from 'node:fs';
+import hljs from 'highlight.js/lib/common';
+import AdminLayout from '../../../../layouts/AdminLayout.astro';
+import Base from '../../../../layouts/Base.astro';
+import Icon from '../../../../components/Icon.astro';
+import { get } from '../../../../lib/db';
+import { pathFile, getKelas, type SubFile, type Submission } from '../../../../lib/tugas';
+import { CODE_LANG, IMAGE_EXT, sepertiTeks } from '../../../../lib/files';
+import { ekstensi, fmtUkuran, fmtWaktu, escapeHtml } from '../../../../lib/util';
+
+const f = get<SubFile>('SELECT * FROM submission_file WHERE id = ?', Number(Astro.params.id));
+if (!f) return new Response('File tidak ditemukan', { status: 404 });
+const s = get<Submission>('SELECT * FROM submission WHERE id = ?', f.submission_id)!;
+const kelas = getKelas(s.kelas_id);
+const abs = pathFile(s, f);
+const embed = Astro.url.searchParams.get('embed') === '1';
+const ext = ekstensi(f.nama_asli);
+
+let mode: 'pdf' | 'image' | 'video' | 'code' | 'none' | 'missing' = 'none';
+let html = '';
+let terpotong = false;
+const MAX = 400 * 1024;
+if (!abs || !fs.existsSync(abs)) mode = 'missing';
+else if (ext === 'pdf') mode = 'pdf';
+else if (IMAGE_EXT.has(ext)) mode = 'image';
+else if (['mp4', 'webm'].includes(ext)) mode = 'video';
+else {
+  const fd = fs.openSync(abs, 'r');
+  const buf = Buffer.alloc(Math.min(f.ukuran, MAX));
+  fs.readSync(fd, buf, 0, buf.length, 0);
+  fs.closeSync(fd);
+  if (CODE_LANG[ext] !== undefined || sepertiTeks(buf)) {
+    if (sepertiTeks(buf)) {
+      mode = 'code';
+      terpotong = f.ukuran > MAX;
+      const text = buf.toString('utf8');
+      const lang = CODE_LANG[ext];
+      try {
+        html = lang && lang !== 'plaintext' && hljs.getLanguage(lang)
+          ? hljs.highlight(text, { language: lang, ignoreIllegals: true }).value
+          : escapeHtml(text);
+      } catch { html = escapeHtml(text); }
+    }
+  }
+}
+const baris = mode === 'code' ? html.split('\n').length : 0;
+const src = `/admin/tugas/file/${f.id}?inline=1`;
+const dl = `/admin/tugas/file/${f.id}`;
+const Layout = embed ? Base : AdminLayout;
+---
+<Layout title={f.nama_asli} bare={embed}>
+  <div class:list={[embed ? 'h-screen flex flex-col' : '']}>
+    {!embed && (
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div class="min-w-0">
+          <a href="/admin/tugas" class="text-xs font-semibold text-blue-600 inline-flex items-center gap-1"><Icon name="arrowLeft" class="w-3.5 h-3.5" /> Tugas Masuk</a>
+          <h1 class="text-lg font-extrabold truncate">{f.nama_asli}</h1>
+          <p class="text-xs text-gray-500">{s.nim} · {s.nama} · {kelas?.nama} · {fmtWaktu(s.created_at)} · {fmtUkuran(f.ukuran)}</p>
+        </div>
+        <a href={dl} class="btn btn-primary"><Icon name="download" /> Download</a>
+      </div>
+    )}
+    <div class:list={['bg-white dark:bg-gray-900', embed ? 'flex-1 min-h-0 overflow-auto' : 'card overflow-hidden']}>
+      {mode === 'pdf' && <iframe src={src} class:list={['w-full border-0', embed ? 'h-full' : 'h-[80vh]']} title={f.nama_asli}></iframe>}
+      {mode === 'image' && <div class="p-4 flex justify-center bg-[repeating-conic-gradient(#f3f4f6_0_25%,#fff_0_50%)] dark:bg-gray-900 bg-[length:20px_20px] min-h-full"><img src={src} alt={f.nama_asli} class="max-w-full h-auto object-contain" /></div>}
+      {mode === 'video' && <video src={src} controls class="w-full max-h-full bg-black"></video>}
+      {mode === 'code' && (
+        <div class="text-[13px] leading-6 font-mono">
+          {terpotong && <div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-xs font-semibold">File besar — hanya 400 KB pertama yang ditampilkan. Download untuk melihat semuanya.</div>}
+          <div class="flex">
+            <pre class="select-none text-right pr-3 pl-3 py-3 text-gray-400 bg-gray-50 dark:bg-gray-800/60 border-r border-gray-200 dark:border-gray-700">{Array.from({ length: baris }, (_, i) => i + 1).join('\n')}</pre>
+            <pre class="hljs flex-1 py-3 px-4 overflow-x-auto"><code set:html={html} /></pre>
+          </div>
+        </div>
+      )}
+      {(mode === 'none' || mode === 'missing') && (
+        <div class="h-full min-h-[40vh] flex flex-col items-center justify-center gap-3 p-8 text-center">
+          <Icon name="file" class="w-12 h-12 text-gray-300" stroke={1.5} />
+          <p class="font-bold">{mode === 'missing' ? 'File tidak ditemukan di server' : `Format .${ext || '?'} tidak bisa dipratinjau`}</p>
+          <p class="text-sm text-gray-500">{mode === 'missing' ? 'Mungkin sudah dihapus dari folder data.' : 'Download file untuk membukanya di aplikasi yang sesuai.'}</p>
+          {mode === 'none' && <a href={dl} class="btn btn-primary mt-2"><Icon name="download" /> Download ({fmtUkuran(f.ukuran)})</a>}
+        </div>
+      )}
+    </div>
+  </div>
+</Layout>

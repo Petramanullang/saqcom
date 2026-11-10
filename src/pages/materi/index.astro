@@ -1,0 +1,81 @@
+---
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import { all } from '../../lib/db';
+import { listGrupMateri } from '../../lib/materi';
+import { fmtUkuran, ekstensi } from '../../lib/util';
+
+const matkul = all<{ nama_matkul: string; jurusan: string; semester: number; sks: number }>('SELECT * FROM matkul');
+const lookup = new Map(matkul.map((m) => [`${m.nama_matkul.trim()}|${m.jurusan.trim()}`, m]));
+const grup = listGrupMateri()
+  .map((g) => {
+    const m = lookup.get(`${g.nama_matkul.trim()}|${g.jurusan.trim()}`);
+    return { ...g, semester: g.semester || m?.semester || null, sks: g.sks || m?.sks || null };
+  })
+  .sort((a, b) => a.nama_matkul.localeCompare(b.nama_matkul) || a.kelas.localeCompare(b.kelas));
+---
+<Base title="Download Materi" active="materi">
+  <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20"><Icon name="download" class="w-5 h-5" /></div>
+      <div>
+        <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Bahan Ajar Praktikum</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Download materi mata kuliah Anda</p>
+      </div>
+    </div>
+    <div class="relative w-full sm:w-96">
+      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icon name="search" /></span>
+      <input id="cari" type="search" class="input !pl-9" placeholder="Cari mata kuliah, dosen, kelas, atau materi…" />
+    </div>
+  </div>
+
+  {grup.length === 0 && <div class="card p-12 text-center text-gray-500">Belum ada materi yang diupload.</div>}
+  <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-5" id="daftar">
+    {grup.map((g) => (
+      <article class="card p-5 flex flex-col" data-cari={`${g.nama_matkul} ${g.jurusan} ${g.nama_dosen} kelas ${g.kelas}`.toLowerCase()}>
+        <h2 class="font-extrabold leading-snug">{g.nama_matkul}</h2>
+        <div class="flex flex-wrap gap-1.5 mt-2">
+          <span class="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{g.jurusan}</span>
+          {g.kelas && <span class="badge bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">Kelas {g.kelas}</span>}
+          {g.semester && <span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Semester {g.semester}</span>}
+          {g.sks && <span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">{g.sks} SKS</span>}
+        </div>
+        <p class="text-xs text-gray-500 mt-2">Dosen: {g.nama_dosen}</p>
+        {g.is_locked ? (
+          <div class="mt-4 flex-1 flex flex-col items-center justify-center gap-2 py-6 rounded-2xl bg-gray-50 dark:bg-gray-900/40 text-gray-500">
+            <Icon name="lock" class="w-7 h-7" /><p class="text-sm font-semibold">Akses Materi Dikunci</p>
+          </div>
+        ) : (
+          <ul class="mt-4 space-y-2">
+            {g.materi.length === 0 && <li class="text-sm text-gray-500">Belum ada materi.</li>}
+            {g.materi.map((m) => (
+              <li class="flex items-center gap-3 p-2.5 rounded-xl border border-gray-100 dark:border-gray-700/60 hover:border-emerald-300" data-item={m.judul_materi.toLowerCase()}>
+                <span class="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 flex items-center justify-center text-[10px] font-black uppercase shrink-0">{ekstensi(m.nama_file) || 'file'}</span>
+                <span class="flex-1 min-w-0"><span class="block text-sm font-semibold truncate">{m.judul_materi}</span>{m.ukuran > 0 && <span class="text-[11px] text-gray-400">{fmtUkuran(m.ukuran)}</span>}</span>
+                <a href={`/materi/file/${m.id}`} class="btn btn-sm btn-success shrink-0"><Icon name="download" class="w-3.5 h-3.5" /> Download</a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </article>
+    ))}
+  </div>
+  <p id="kosong" class="hidden card p-10 text-center text-gray-500">Tidak ada materi yang cocok.</p>
+
+  <script is:inline>
+    document.getElementById('cari').addEventListener('input', function () {
+      const q = this.value.trim().toLowerCase();
+      let ada = 0;
+      document.querySelectorAll('#daftar > article').forEach((card) => {
+        const items = card.querySelectorAll('[data-item]');
+        const cocokKartu = !q || card.dataset.cari.includes(q);
+        let cocokItem = 0;
+        items.forEach((li) => { const ok = cocokKartu || li.dataset.item.includes(q); li.style.display = ok ? '' : 'none'; if (ok) cocokItem++; });
+        const tampil = cocokKartu || cocokItem > 0;
+        card.style.display = tampil ? '' : 'none';
+        if (tampil) ada++;
+      });
+      document.getElementById('kosong').classList.toggle('hidden', ada > 0);
+    });
+  </script>
+</Base>

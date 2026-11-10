@@ -1,0 +1,22 @@
+---
+import LegacyPage from '../../components/LegacyPage.astro';
+import KelasPicker from '../../components/KelasPicker.astro';
+import html from '../../legacy/quiz-user-index.html?raw';
+import { kelasHariIni } from '../../lib/jadwal';
+
+const kelasUrl = Astro.url.searchParams.get('kelas');
+const awal = kelasUrl && /^\d+$/.test(kelasUrl) ? kelasUrl : String(kelasHariIni().defaultJadwalId ?? '');
+---
+<LegacyPage html={html} title="Quiz" active="quiz">
+  <script is:inline define:vars={{ awal }}>window.__kelasQuiz = awal;</script>
+  <div class="max-w-7xl w-full mx-auto px-4 md:px-10 pt-6 -mb-2" x-data
+    @kelas-dipilih="const v = $event.detail ? $event.detail.value : ''; if (v !== window.__kelasQuiz) { window.__kelasQuiz = v; window.dispatchEvent(new CustomEvent('kelas-quiz', { detail: v })); }">
+    <div class="card p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+      <div class="sm:w-48 shrink-0">
+        <p class="font-extrabold text-sm">Kelas Anda</p>
+        <p class="text-[11px] text-gray-500">Quiz yang tampil hanya untuk kelas ini.</p>
+      </div>
+      <KelasPicker name="kelas" mode="jadwal" value={awal} class="flex-1" placeholder="Pilih kelas praktikum…" />
+    </div>
+  </div>
+</LegacyPage>

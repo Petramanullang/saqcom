@@ -1,0 +1,54 @@
+---
+/**
+ * Menampilkan halaman Alpine lama (quiz, timer) yang disimpan sebagai HTML mentah di src/legacy.
+ * Marker: <!--ATTRS {...}-->, <!--STYLE-->…<!--/STYLE-->, <!--NAV-->, <!--HEADER-->, <!--FOOTER-->.
+ * admin = true → dibungkus layout Panel Asisten (sidebar), navbar lama dibuang.
+ */
+import '../styles/global.css';
+import '../styles/quiz.css';
+import Header from './Header.astro';
+import Footer from './Footer.astro';
+
+interface Props { html: string; title: string; admin?: boolean; active?: string; scripts?: string[]; sebelum?: string }
+const { html, title, admin = false, active, scripts = [], sebelum = '' } = Astro.props;
+
+const attrJson = html.match(/<!--ATTRS (.*?) -->/)?.[1] ?? '""';
+const attrStr: string = JSON.parse(attrJson);
+const attrs: Record<string, string> = {};
+for (const m of attrStr.matchAll(/([\w:@.-]+)(?:="([^"]*)")?/g)) attrs[m[1]] = m[2] ?? '';
+const style = html.match(/<!--STYLE-->([\s\S]*?)<!--\/STYLE-->/)?.[1] ?? '';
+const body = html.replace(/<!--ATTRS .*? -->/, '').replace(/<!--STYLE-->[\s\S]*?<!--\/STYLE-->/, '').replace('<!--NAV-->', '');
+
+const [awal, setelahHeader = ''] = body.includes('<!--HEADER-->') ? body.split('<!--HEADER-->') : ['', body];
+const [tengah, akhir = ''] = setelahHeader.includes('<!--FOOTER-->') ? setelahHeader.split('<!--FOOTER-->') : [setelahHeader, ''];
+const pakaiHeader = body.includes('<!--HEADER-->');
+const pakaiFooter = body.includes('<!--FOOTER-->');
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} - SAQ LAB</title>
+    <link rel="icon" type="image/webp" href="/img/lab-saql.webp" />
+    <script is:inline>try { if (localStorage.getItem('darkMode') === 'enabled') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    {scripts.map((s) => <script is:inline src={s}></script>)}
+    <script is:inline defer src="/vendor/alpine.min.js"></script>
+    <Fragment set:html={style} />
+  </head>
+  <body {...attrs}>
+    <Fragment set:html={awal} />
+    {pakaiHeader && <Header active={active} />}
+    <Fragment set:html={sebelum} />
+    <slot />
+    <Fragment set:html={tengah} />
+    {pakaiFooter && <Footer />}
+    <Fragment set:html={akhir} />
+    <script is:inline>
+      document.querySelectorAll('[data-theme-toggle]').forEach(function (b) {
+        b.addEventListener('click', function () { var d = document.documentElement.classList.toggle('dark'); try { localStorage.setItem('darkMode', d ? 'enabled' : 'disabled'); } catch (e) {} });
+      });
+      document.addEventListener('click', function (e) { document.querySelectorAll('details[data-dropdown][open]').forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute('open'); }); });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+---
+import LegacyAdmin from '../../../components/LegacyAdmin.astro';
+import html from '../../../legacy/quiz-admin-builder.html?raw';
+import { opsiKelas } from '../../../lib/jadwal';
+
+// Daftar kelas semester aktif untuk pengaturan "Kelas yang boleh akses"
+const opsi = opsiKelas().semua.map((k) => ({ id: k.id, label: k.label, waktu: `${k.waktu}–${k.selesai}`, cari: k.cari }));
+const data = `<script type="application/json" id="opsi-kelas">${JSON.stringify(opsi).replace(/</g, '\\u003c')}</script>`;
+---
+<LegacyAdmin html={html} title="Quiz Builder" active="quiz_admin" sebelum={data} scripts={['/vendor/sortable.min.js', '/vendor/xlsx.full.min.js']} />

@@ -1,0 +1,128 @@
+---
+/**
+ * Dropdown kelas berbasis jadwal semester aktif (bisa dicari).
+ * Default otomatis = kelas yang sedang berjalan (atau terdekat hari ini).
+ * Mengirim event `kelas-dipilih` (detail = item) ke elemen induk.
+ */
+import { opsiKelas, HARI } from '../lib/jadwal';
+import { all } from '../lib/db';
+
+export interface ItemKelas { value: string; label: string; sub: string; grup: string; cari: string; pj?: string; jadwalId?: number | null; berjalan?: boolean }
+interface Props {
+  name: string;
+  /** Nilai yang dikirim: id jadwal, atau id kelas upload (kelas_tugas). */
+  mode?: 'jadwal' | 'kelasTugas' | 'kontrak';
+  /** Sertakan kelas upload manual (kelas pengganti) — hanya untuk mode kelasTugas. */
+  manual?: boolean;
+  /** Label opsi kosong, mis. "Semua kelas". Kosong = wajib pilih. */
+  kosong?: string;
+  value?: string | number | null;
+  /** true = jangan pakai default jadwal, biarkan sesuai `value`. */
+  tanpaDefault?: boolean;
+  placeholder?: string;
+  class?: string;
+  /** Item tambahan di luar jadwal semester aktif (mis. kelas lama). */
+  tambahan?: ItemKelas[];
+}
+const { name, mode = 'jadwal', manual = false, kosong = '', value = null, tanpaDefault = false, placeholder = 'Pilih kelas…', class: cls = '', tambahan = [] } = Astro.props;
+const o = opsiKelas();
+const val = (x: { id: number; kelasTugasId: number | null; kontrakId: string | null }) =>
+  mode === 'jadwal' ? String(x.id) : mode === 'kontrak' ? x.kontrakId ?? '' : x.kelasTugasId ? String(x.kelasTugasId) : '';
+const items: ItemKelas[] = [];
+for (const x of o.hariIni) {
+  const v = val(x); if (!v) continue;
+  const berjalan = x.id === o.berjalanId;
+  items.push({ value: v, label: x.label, sub: `${x.waktu}${x.pengganti ? ' · pengganti' : ''} · PJ ${x.pj || '-'}`, grup: 'Hari ini', cari: x.cari, pj: x.pj, jadwalId: x.id, berjalan });
+}
+for (const x of o.semua) {
+  const v = val(x); if (!v) continue;
+  items.push({ value: v, label: x.label, sub: `${x.waktu}–${x.selesai} · ${x.dosen}`, grup: HARI[x.hari], cari: x.cari, pj: x.pj, jadwalId: x.id });
+}
+if (manual && mode === 'kelasTugas') {
+  for (const k of all<{ id: number; nama: string }>('SELECT id, nama FROM kelas_tugas WHERE jadwal_id IS NULL AND aktif = 1 ORDER BY urutan, nama')) {
+    items.push({ value: String(k.id), label: k.nama.replace(/_/g, ' '), sub: 'Kelas tambahan / pengganti', grup: 'Kelas tambahan', cari: k.nama.toLowerCase() });
+  }
+}
+items.push(...tambahan);
+let awal = value != null && value !== '' ? String(value) : '';
+if (!awal && !tanpaDefault && o.defaultId) {
+  const d = items.find((i) => i.jadwalId === o.defaultId);
+  if (d) awal = d.value;
+}
+const cfg = { items, awal, kosong, placeholder };
+const id = `kp-${name}-${Math.random().toString(36).slice(2, 7)}`;
+---
+<div class={`relative ${cls}`} x-data={`kelasPicker('${id}')`} @keydown.escape="buka = false" @click.outside="buka = false">
+  <script is:inline type="application/json" id={id} set:html={JSON.stringify(cfg).replace(/</g, '\\u003c')}></script>
+  <input type="hidden" name={name} :value="nilai" />
+  <button type="button" @click="buka = !buka; $nextTick(() => $refs.cari?.focus())"
+    class="w-full flex items-center gap-2 text-left px-3.5 py-2.5 rounded-xl border bg-white dark:bg-gray-900/60 text-sm transition cursor-pointer"
+    :class="buka ? 'border-blue-500 ring-4 ring-blue-500/10' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'">
+    <span class="flex-1 min-w-0">
+      <template x-if="dipilih">
+        <span class="block">
+          <span class="flex items-center gap-1.5 font-semibold truncate"><span x-show="dipilih.berjalan" class="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"></span><span class="truncate" x-text="dipilih.label"></span></span>
+          <span class="block text-[11px] text-gray-500 truncate" x-text="dipilih.sub"></span>
+        </span>
+      </template>
+      <span x-show="!dipilih" class="text-gray-500" x-text="nilai === '' && cfg.kosong ? cfg.kosong : cfg.placeholder"></span>
+    </span>
+    <svg class="w-4 h-4 text-gray-400 shrink-0 transition" :class="buka && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+  </button>
+  <div x-show="buka" x-transition.origin.top class="absolute z-50 mt-1.5 w-full min-w-[300px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden">
+    <div class="p-2 border-b border-gray-100 dark:border-gray-800">
+      <input x-ref="cari" type="search" x-model="q" placeholder="Cari matkul, kelas, dosen, hari, asisten…" class="input !py-2" @keydown.enter.prevent="pilihPertama()" />
+    </div>
+    <div class="max-h-80 overflow-y-auto py-1">
+      <template x-if="cfg.kosong">
+        <button type="button" @click="pilih('')" class="w-full text-left px-4 py-2 text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-800" :class="nilai === '' && 'text-blue-600'" x-text="cfg.kosong"></button>
+      </template>
+      <template x-for="g in grup" :key="g.nama">
+        <div>
+          <p class="px-4 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-widest" :class="g.nama === 'Hari ini' ? 'text-emerald-600' : 'text-gray-400'" x-text="g.nama"></p>
+          <template x-for="it in g.items" :key="g.nama + it.value">
+            <button type="button" @click="pilih(it.value, it)" class="w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-start gap-2" :class="it.value === nilai && 'bg-blue-50 dark:bg-blue-900/20'">
+              <span class="mt-1.5 w-2 h-2 rounded-full shrink-0" :class="it.berjalan ? 'bg-emerald-500 animate-pulse' : 'bg-transparent'"></span>
+              <span class="min-w-0">
+                <span class="block text-sm font-semibold leading-tight" x-text="it.label"></span>
+                <span class="block text-[11px] text-gray-500" x-text="(it.berjalan ? 'Sedang berlangsung · ' : '') + it.sub"></span>
+              </span>
+            </button>
+          </template>
+        </div>
+      </template>
+      <p x-show="!grup.length" class="px-4 py-6 text-center text-sm text-gray-500">Tidak ada kelas yang cocok.</p>
+    </div>
+  </div>
+</div>
+
+<script is:inline>
+  if (!window.__kelasPicker) {
+    window.__kelasPicker = true;
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('kelasPicker', (id) => {
+        const cfg = JSON.parse(document.getElementById(id).textContent);
+        return {
+          cfg, buka: false, q: '', nilai: cfg.awal,
+          init() { this.$nextTick(() => { if (this.dipilih) this.$dispatch('kelas-dipilih', this.dipilih); }); },
+          get dipilih() { return this.nilai === '' ? null : (cfg.items.find((i) => i.value === this.nilai && i.grup === 'Hari ini') || cfg.items.find((i) => i.value === this.nilai) || null); },
+          get grup() {
+            const kata = this.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+            const out = [];
+            for (const it of cfg.items) {
+              const teks = (it.cari + ' ' + it.grup + ' ' + it.label + ' ' + it.sub).toLowerCase();
+              // Satu huruf (mis. "b") dianggap nama kelas: "Kelas B"
+              if (kata.length && !kata.every((w) => (w.length === 1 ? it.label.toLowerCase().includes('kelas ' + w) : teks.includes(w)))) continue;
+              let g = out.find((x) => x.nama === it.grup);
+              if (!g) out.push((g = { nama: it.grup, items: [] }));
+              g.items.push(it);
+            }
+            return out;
+          },
+          pilih(v, it) { this.nilai = v; this.buka = false; this.q = ''; this.$dispatch('kelas-dipilih', it || null); },
+          pilihPertama() { const g = this.grup[0]; if (g) this.pilih(g.items[0].value, g.items[0]); },
+        };
+      });
+    });
+  }
+</script>

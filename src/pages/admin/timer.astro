@@ -1,0 +1,7 @@
+---
+import LegacyPage from '../../components/LegacyPage.astro';
+import html from '../../legacy/timer.html?raw';
+// Timer dibuka di layar proyektor: tanpa navbar, cukup tombol kembali kecil.
+const kembali = '<a href="/admin" class="fixed top-4 left-4 z-50 px-3 py-1.5 rounded-xl bg-white/80 dark:bg-gray-800/80 backdrop-blur text-xs font-bold text-gray-600 dark:text-gray-300 shadow hover:scale-105 transition">&larr; Panel Asisten</a>';
+---
+<LegacyPage html={html.replace('<!--HEADER-->', '')} title="Timer Kelas" sebelum={kembali} />

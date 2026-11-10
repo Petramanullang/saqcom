@@ -1,0 +1,38 @@
+---
+---
+<footer class="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 mt-12 py-10 w-full print:hidden">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+      <div>
+        <div class="flex items-center gap-2.5 mb-3">
+          <img class="h-8 w-auto object-contain" src="/img/lab-saql.webp" alt="SAQ Lab" />
+          <span class="font-extrabold text-sm tracking-wider uppercase text-gray-800 dark:text-white">SAQ LAB</span>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed max-w-xs">
+          Sistem mandiri terintegrasi untuk mendukung praktikum: pengumpulan tugas, pembagian materi, quiz, dan pengelolaan kelas.
+        </p>
+      </div>
+      <div>
+        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-white mb-4">Layanan &amp; Fitur</h3>
+        <ul class="space-y-2.5 text-xs">
+          <li><a href="/" class="text-gray-500 dark:text-gray-400 hover:text-blue-600">Upload Tugas Praktikum</a></li>
+          <li><a href="/materi" class="text-gray-500 dark:text-gray-400 hover:text-blue-600">Download Materi</a></li>
+          <li><a href="/kontrak" class="text-gray-500 dark:text-gray-400 hover:text-blue-600">Kontrak Tempat Duduk</a></li>
+          <li><a href="/quiz" class="text-gray-500 dark:text-gray-400 hover:text-blue-600">Quiz</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-white mb-4">Informasi &amp; Bantuan</h3>
+        <ul class="space-y-3 text-xs text-gray-500 dark:text-gray-400">
+          <li>Software Architecture and Quality Laboratory, ITPLN Campus Lt. 3</li>
+          <li>lablanjut@itpln.ac.id</li>
+          <li><a href="https://instagram.com/saqlab.itpln" target="_blank" rel="noopener" class="hover:text-blue-600">@saqlab.itpln</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="pt-6 border-t border-gray-100 dark:border-gray-800 text-[11px] text-gray-400 flex flex-col sm:flex-row justify-between gap-2">
+      <span>&copy; {new Date().getFullYear()} SAQ Laboratory — Institut Teknologi PLN</span>
+      <span>IP Anda: <code>{Astro.locals.ip}</code>{Astro.locals.pc ? ` · PC ${Astro.locals.pc}` : ''}</span>
+    </div>
+  </div>
+</footer>

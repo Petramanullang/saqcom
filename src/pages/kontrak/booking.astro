@@ -1,0 +1,64 @@
+---
+import '../../styles/global.css';
+import { kelasAktif, booking, getKursi, KontrakError } from '../../lib/kontrak';
+import { bersihkanNama, str, int } from '../../lib/util';
+import { isLoopback } from '../../lib/auth';
+
+if (Astro.request.method !== 'POST') return Astro.redirect('/kontrak');
+
+const { settings, isAdmin } = Astro.locals;
+let judul = '';
+let pesan = '';
+try {
+  const f = await Astro.request.formData();
+  let rawNim = str(f.get('nim'));
+  let rawNama = str(f.get('nama'));
+  // Tukar otomatis jika NIM & Nama terbalik (autofill browser)
+  if (/^[a-zA-Z\s.,'-]+$/.test(rawNim) && /^[0-9]+$/.test(rawNama)) [rawNim, rawNama] = [rawNama, rawNim];
+  const nim = rawNim.replace(/\D/g, '');
+  const nama = bersihkanNama(rawNama).toUpperCase();
+  const pc = int(f.get('nomor_bangku'));
+
+  if (nim.length < 5 || nim.length > 15) throw new KontrakError('NIM Tidak Valid!', 'NIM harus berupa angka murni (5-15 digit) tanpa spasi, huruf, atau karakter lain.');
+  if (nama.length < 2) throw new KontrakError('Nama Wajib Diisi!', 'Tulis nama lengkap sesuai SIAKAD.');
+  if (!f.get('janji')) throw new KontrakError('Perjanjian Belum Dicentang', 'Centang pernyataan menjaga fasilitas PC terlebih dahulu.');
+  if (pc < 1 || pc > settings.jumlahPc) throw new KontrakError('PC Tidak Valid', 'Nomor PC tidak dikenal.');
+
+  const aktif = kelasAktif();
+  if (!aktif) throw new KontrakError('Sesi Tertutup!', 'Tidak ada sesi kelas yang sedang dibuka oleh asisten saat ini.');
+
+  // Validasi posisi PC berdasarkan IP lab
+  let ip = Astro.locals.ip;
+  let pcIp = Astro.locals.pc;
+  if (isLoopback(ip)) { ip = settings.labIpPrefix + pc; pcIp = pc; } // mode uji di PC server
+  if (!pcIp && !isAdmin) throw new KontrakError('Akses Ditolak!', 'Anda tidak terhubung ke jaringan lokal LAN/Wi-Fi Laboratorium SAQ.');
+  if (pcIp && pcIp !== pc && !isAdmin) throw new KontrakError('Pelanggaran Posisi!', `Sistem mendeteksi Anda berada di PC ${pcIp}. Anda tidak diizinkan mem-booking PC ${pc}!`);
+
+  if (getKursi(aktif.id, pc)) throw new KontrakError('Bangku Penuh!', `Maaf, PC ${pc} sudah dikontrak oleh praktikan lain!`);
+  booking(aktif.id, pc, nim, nama, ip);
+  return Astro.redirect(`/kontrak/tiket/${aktif.id}/${pc}?baru=1`);
+} catch (e) {
+  if (!(e instanceof KontrakError)) throw e;
+  judul = e.judul;
+  pesan = e.message;
+}
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gagal - Kontrak SAQ</title>
+    <script is:inline src="/vendor/sweetalert2.min.js"></script>
+    <style is:inline>body { background-color: #020617; }</style>
+  </head>
+  <body>
+    <noscript><p style="color:#fff;padding:24px">{judul} — {pesan} <a href="/kontrak" style="color:#93c5fd">Kembali</a></p></noscript>
+    <script is:inline define:vars={{ judul, pesan }}>
+      Swal.fire({
+        title: judul, text: pesan, icon: 'error', background: '#1e293b', color: '#f8fafc',
+        confirmButtonColor: '#3b82f6', confirmButtonText: 'Kembali',
+        customClass: { popup: 'rounded-3xl border border-slate-700 shadow-2xl', confirmButton: 'rounded-xl px-6 py-3 font-bold tracking-widest uppercase' },
+      }).then(() => { history.length > 1 ? history.back() : (location.href = '/kontrak'); });
+    </script>
+  </body>
+</html>

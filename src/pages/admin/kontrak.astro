@@ -1,0 +1,400 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import KelasPicker from '../../components/KelasPicker.astro';
+import { semesterAktif, listJadwal, listAsisten, kelasHariIni } from '../../lib/jadwal';
+import { all, get, run, tx } from '../../lib/db';
+import {
+  listKelasKontrak, getKelasKontrak, kelasAktif, kursiKelas, getKursi, buatKelas, setStatus, listLaporan, hashTiket,
+  type Kursi,
+} from '../../lib/kontrak';
+import { flashUrl, str, int, nowWib, fmtWaktu, bersihkanNama, todayWib, fmtTanggalPanjang } from '../../lib/util';
+
+const { settings } = Astro.locals;
+const JPC = settings.jumlahPc;
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const aksi = str(f.get('aksi'));
+  const kelasId = str(f.get('kelas_id'));
+  const back = `/admin/kontrak${kelasId ? `?filter=${encodeURIComponent(kelasId)}` : ''}`;
+  const ok = (m: string, url = back) => Astro.redirect(flashUrl(url, 'ok', m));
+  const err = (m: string, url = back) => Astro.redirect(flashUrl(url, 'err', m));
+  switch (aksi) {
+    case 'tambah_kelas': {
+      const mk = str(f.get('mk')); const nama = str(f.get('nama_kelas'));
+      if (!mk || !nama) return err('Mata kuliah dan nama kelas wajib diisi.', '/admin/kontrak');
+      const id = buatKelas(mk, nama, str(f.get('koordinator_mk')));
+      return ok('Kelas berhasil ditambahkan!', `/admin/kontrak?filter=${id}`);
+    }
+    case 'edit_kelas':
+      run('UPDATE kontrak_kelas SET mk = ?, nama = ?, koordinator_mk = ? WHERE id = ?', str(f.get('mk')), str(f.get('nama_kelas')), str(f.get('koordinator_mk')) || 'SAQ LABORATORY', kelasId);
+      return ok('Data kelas berhasil diperbarui!');
+    case 'hapus_kelas':
+      run('DELETE FROM kontrak_kelas WHERE id = ?', kelasId);
+      return ok('Kelas dan seluruh data kontraknya telah dihapus permanen!', '/admin/kontrak');
+    case 'buka_baru': {
+      // Buka sesi dari modal: kelas dipilih dari jadwal, PJ otomatis dari jadwal (bisa diganti)
+      const id = str(f.get('kontrak_id')); const pj = bersihkanNama(str(f.get('asisten_pj')));
+      if (!getKelasKontrak(id)) return err('Pilih kelas dari jadwal terlebih dahulu.', '/admin/kontrak');
+      if (!pj) return err('Asisten PJ wajib diisi.', '/admin/kontrak');
+      setStatus(id, true, pj);
+      return ok('Sesi Kelas Dibuka!', `/admin/kontrak?filter=${id}`);
+    }
+    case 'set_status': {
+      const buka = str(f.get('status')) === 'buka';
+      const k = getKelasKontrak(kelasId);
+      if (!k) return err('Kelas tidak valid!');
+      setStatus(kelasId, buka, buka ? bersihkanNama(str(f.get('asisten_pj'))) || k.asisten_pj : undefined);
+      return ok(buka ? 'Sesi Kelas Dibuka!' : 'Sesi Kelas Ditutup!');
+    }
+    case 'reset_semua':
+      run('DELETE FROM kontrak_kursi WHERE kelas_id = ?', kelasId);
+      return ok('Seluruh bangku di kelas ini telah direset!');
+    case 'reset_satu': {
+      const no = int(f.get('no_pc'));
+      run('DELETE FROM kontrak_kursi WHERE kelas_id = ? AND no_pc = ?', kelasId, no);
+      return ok(`Data PC ${no} berhasil dikosongkan!`);
+    }
+    case 'pindah': {
+      const asal = int(f.get('pc_asal')); const tujuan = int(f.get('pc_tujuan'));
+      try {
+        tx(() => {
+          if (getKursi(kelasId, tujuan)) throw new Error(`PC tujuan (${tujuan}) sudah terisi!`);
+          run("UPDATE kontrak_kursi SET no_pc = ?, ip_address = 'Dipindah Admin (Swap)' WHERE kelas_id = ? AND no_pc = ?", tujuan, kelasId, asal);
+        });
+      } catch (e: any) { return err('GAGAL: ' + e.message); }
+      return ok(`Berhasil! Mahasiswa dipindahkan dari PC ${asal} ke PC ${tujuan}.`);
+    }
+    case 'isi_manual': {
+      const no = int(f.get('no_pc')); const nim = str(f.get('nim')).replace(/\D/g, ''); const nama = bersihkanNama(str(f.get('nama'))).toUpperCase();
+      if (!nim || !nama || no < 1 || no > JPC) return err('NIM dan nama wajib diisi.');
+      run(`INSERT INTO kontrak_kursi(kelas_id, no_pc, nim, nama, janji, waktu_kontrak, ip_address) VALUES (?,?,?,?,1,?,'Isi Manual (Admin)')
+        ON CONFLICT(kelas_id, no_pc) DO UPDATE SET nim = excluded.nim, nama = excluded.nama, waktu_kontrak = excluded.waktu_kontrak, ip_address = excluded.ip_address`, kelasId, no, nim, nama, nowWib());
+      return ok(`Kontrak manual PC ${no} berhasil disimpan!`);
+    }
+    case 'selesai_laporan':
+      run("UPDATE laporan_kerusakan SET status = 'selesai' WHERE id = ?", str(f.get('id_laporan')));
+      return ok('Laporan Kerusakan PC telah ditandai Selesai (Fixed)!');
+    case 'hapus_laporan':
+      run('DELETE FROM laporan_kerusakan WHERE id = ?', str(f.get('id_laporan')));
+      return ok('Laporan dihapus.');
+  }
+  return Astro.redirect(back);
+}
+
+const semuaKelas = listKelasKontrak();
+const sem = semesterAktif();
+const idJadwalAktif = new Set(listJadwal().map((j) => j.id));
+// Kelas semester aktif (dari jadwal) vs kelas lama / manual
+const kelas = semuaKelas.filter((k) => k.jadwal_id && idJadwalAktif.has(k.jadwal_id));
+const kelasLain = semuaKelas.filter((k) => !(k.jadwal_id && idJadwalAktif.has(k.jadwal_id)))
+  .map((k) => ({ value: k.id, label: `${k.mk} — Kelas ${k.nama}`, sub: k.is_active ? 'Sesi aktif' : 'Semester lama / manual', grup: 'Kelas lama / manual', cari: `${k.mk} ${k.nama}`.toLowerCase() }));
+const aktif = kelasAktif();
+const filterParam = Astro.url.searchParams.get('filter');
+const filter = filterParam === 'semua' ? 'semua' : (filterParam && semuaKelas.find((k) => k.id === filterParam)?.id) || aktif?.id || (() => { const d = kelasHariIni().defaultJadwalId; return d ? kelas.find((k) => k.jadwal_id === d)?.id : undefined; })() || kelas[0]?.id || '';
+const kelasPilih = filter && filter !== 'semua' ? semuaKelas.find((k) => k.id === filter) : undefined;
+
+type Baris = { kelas_id: string; mk: string; nama_kelas: string; no_pc: number; k?: Kursi };
+const baris: Baris[] = [];
+for (const kl of filter === 'semua' ? kelas : kelasPilih ? [kelasPilih] : []) {
+  const isi = new Map(kursiKelas(kl.id).map((x) => [x.no_pc, x]));
+  for (let i = 1; i <= JPC; i++) baris.push({ kelas_id: kl.id, mk: kl.mk, nama_kelas: kl.nama, no_pc: i, k: isi.get(i) });
+}
+const terisi = baris.filter((b) => b.k);
+const kosongPc = kelasPilih ? baris.filter((b) => !b.k).map((b) => b.no_pc) : [];
+
+const sudahKontrak = new Set(all<{ kelas_id: string }>('SELECT DISTINCT kelas_id FROM kontrak_kursi').map((r) => r.kelas_id));
+const kelasSelesai = kelas.filter((k) => sudahKontrak.has(k.id));
+const laporanBaru = listLaporan('pending');
+const laporanSelesai = listLaporan('selesai').slice(0, 30);
+const matkul = all<{ nama_matkul: string; jurusan: string }>('SELECT nama_matkul, jurusan FROM matkul ORDER BY nama_matkul');
+const opsiMk = matkul.map((m) => `${m.nama_matkul} - ${m.jurusan}`);
+const terisiAktif = aktif ? (get<{ c: number }>('SELECT COUNT(*) c FROM kontrak_kursi WHERE kelas_id = ?', aktif.id)!.c) : 0;
+
+const namaLaporan = kelasPilih ? `${kelasPilih.mk} - Kelas ${kelasPilih.nama}` : 'Keseluruhan Kelas';
+const excel = {
+  nama: `Rekap_${(kelasPilih ? `${kelasPilih.mk}_${kelasPilih.nama}` : 'Semua_Kelas').replace(/[^\w-]+/g, '_')}`,
+  rows: baris.map((b) => ({ 'Mata Kuliah': b.mk, Kelas: b.nama_kelas, 'Nomor PC': `PC ${b.no_pc}`, Status: b.k ? 'TERISI' : 'KOSONG', 'NIM Mahasiswa': b.k?.nim || '-', 'Nama Mahasiswa': b.k?.nama || '-', 'Waktu Kontrak': b.k?.waktu_kontrak || '-' })),
+};
+const tanggalCetak = 'Jakarta, ' + fmtTanggalPanjang(todayWib()).split(', ')[1];
+---
+<AdminLayout title="Kontrak (Admin)" active="kontrak_admin" alpine scripts={['/vendor/xlsx.full.min.js', '/vendor/html2pdf.bundle.min.js']}>
+  <script is:inline type="application/json" id="excel-data" set:html={JSON.stringify(excel).replace(/</g, '\\u003c')}></script>
+  <div x-data="kontrakAdmin" x-cloak>
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center"><Icon name="seat" class="w-5 h-5" /></div>
+        <div><h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Kontrak Tempat Duduk</h1><p class="text-sm text-gray-500">Live analytics dan manajemen kontrak PC praktikan</p></div>
+      </div>
+      <a href="/kontrak" target="_blank" class="btn btn-ghost"><Icon name="eye" /> Lihat Denah</a>
+    </div>
+
+    {laporanBaru.length > 0 && (
+      <div class="mb-6 card p-5 border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-900/10">
+        <h3 class="font-extrabold text-red-700 dark:text-red-300 flex items-center gap-2 mb-4">
+          <span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span></span>
+          PERHATIAN: Ada {laporanBaru.length} Laporan Kerusakan Baru!
+        </h3>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {laporanBaru.map((l) => (
+            <div class="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-red-100 dark:border-red-900/40">
+              <div class="flex justify-between text-xs mb-2"><span class="badge bg-red-600 text-white">PC {l.pc}</span><span class="text-gray-400">{fmtWaktu(l.waktu)}</span></div>
+              <h4 class="font-bold text-sm">{l.kategori}</h4>
+              <p class="text-xs text-gray-500 italic mt-1">"{l.deskripsi || 'Tidak ada detail kerusakan yang dilampirkan.'}"</p>
+              <form method="post" class="mt-3" onsubmit={`return confirm('Yakin PC ${l.pc} sudah diperbaiki dan berfungsi normal?')`}>
+                <input type="hidden" name="aksi" value="selesai_laporan" /><input type="hidden" name="id_laporan" value={l.id} />
+                <button class="btn btn-sm btn-success w-full"><Icon name="check" class="w-3.5 h-3.5" /> Tandai Selesai</button>
+              </form>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <div class="grid md:grid-cols-3 gap-4 mb-6">
+      <div class="card p-5">
+        <p class="label">Data Kontrak</p>
+        <p class="text-3xl font-black">{kelasSelesai.length} <span class="text-base text-gray-400 font-bold">dari {kelas.length}</span></p>
+        <p class="text-xs text-gray-500 mb-3" title={kelasSelesai.map((k) => `${k.mk} (${k.nama})`).join('\n') || 'Belum ada kelas'}>Kelas sudah melakukan sesi kontrak</p>
+        <div class="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden"><div class="h-full bg-amber-500" style={`width:${kelas.length ? (kelasSelesai.length / kelas.length) * 100 : 0}%`}></div></div>
+      </div>
+      <div class="md:col-span-2 card p-5 flex flex-wrap items-center gap-4">
+        <div class="flex-1 min-w-[220px]">
+          <p class="label">Status Sesi Saat Ini</p>
+          {aktif ? (
+            <>
+              <p class="text-xl font-black flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>{aktif.mk}</p>
+              <p class="text-sm text-gray-500">Kelas {aktif.nama} · PJ: {aktif.asisten_pj || '-'} · <b>{terisiAktif}/{JPC}</b> PC terisi</p>
+            </>
+          ) : (
+            <><p class="text-xl font-black text-gray-400">Tidak Ada Sesi Aktif</p><p class="text-sm text-gray-500">Sistem kontrak mahasiswa saat ini ditutup.</p></>
+          )}
+        </div>
+        {aktif ? (
+          <form method="post"><input type="hidden" name="aksi" value="set_status" /><input type="hidden" name="kelas_id" value={aktif.id} /><input type="hidden" name="status" value="tutup" />
+            <button class="btn bg-amber-500 hover:bg-amber-600 text-white"><Icon name="lock" /> Tutup Sesi Kontrak</button></form>
+        ) : (
+          <button type="button" class="btn btn-primary" @click="modal = 'buka'"><Icon name="unlock" /> Buka Sesi Kontrak</button>
+        )}
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="card p-4 mb-4 flex flex-wrap items-center gap-2">
+      <div class="w-full sm:w-[360px]" @kelas-dipilih={`const v = $event.detail ? $event.detail.value : 'semua'; if (v !== ${JSON.stringify(filter)}) location.href = '/admin/kontrak?filter=' + encodeURIComponent(v)`}>
+        <KelasPicker name="filter" mode="kontrak" kosong="Tampilkan semua kelas (semester aktif)" value={filter === 'semua' ? '' : filter} tanpaDefault tambahan={kelasLain} />
+      </div>
+      <div class="relative flex-1 min-w-[200px]"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icon name="search" /></span>
+        <input type="search" class="input !pl-9" placeholder="Cari NIM, Nama, PC…" x-model="cari" /></div>
+      <button type="button" class="btn btn-ghost" @click="modal = 'kelas'; formKelas = { aksi: 'tambah_kelas', id: '', mk: '', nama: '', koordinator: '' }"><Icon name="plus" /> Kelas</button>
+      {kelasPilih && <button type="button" class="btn btn-ghost" @click={`modal = 'kelas'; formKelas = ${JSON.stringify({ aksi: 'edit_kelas', id: kelasPilih.id, mk: kelasPilih.mk, nama: kelasPilih.nama, koordinator: kelasPilih.koordinator_mk })}`}><Icon name="pencil" /></button>}
+      <button type="button" class="btn btn-ghost" @click="pdf('tiket', $event.currentTarget)"><Icon name="file" /> Tiket (PDF)</button>
+      <button type="button" class="btn btn-ghost" @click="pdf('tabel', $event.currentTarget)"><Icon name="file" /> Laporan (PDF)</button>
+      {kelasPilih && (
+        <form method="post">
+          <input type="hidden" name="aksi" value="set_status" /><input type="hidden" name="kelas_id" value={kelasPilih.id} />
+          <input type="hidden" name="status" value={kelasPilih.is_active ? 'tutup' : 'buka'} /><input type="hidden" name="asisten_pj" value={kelasPilih.asisten_pj} />
+          <button class:list={['btn', kelasPilih.is_active ? 'text-amber-600 border border-amber-200 hover:bg-amber-50' : 'text-blue-600 border border-blue-200 hover:bg-blue-50']}><Icon name={kelasPilih.is_active ? 'lock' : 'unlock'} />{kelasPilih.is_active ? 'Tutup Sesi' : 'Buka Sesi'}</button>
+        </form>
+      )}
+      {kelasPilih && (
+        <form method="post" onsubmit="return confirm('PENTING: Yakin reset seluruh bangku di kelas ini?')">
+          <input type="hidden" name="aksi" value="reset_semua" /><input type="hidden" name="kelas_id" value={kelasPilih.id} />
+          <button class="btn text-red-600 border border-red-200 hover:bg-red-50 dark:border-red-900"><Icon name="refresh" /> Reset Sesi</button></form>
+      )}
+      {kelasPilih && (
+        <form method="post" onsubmit="return confirm('Hapus kelas ini beserta SELURUH data kontraknya secara permanen?')">
+          <input type="hidden" name="aksi" value="hapus_kelas" /><input type="hidden" name="kelas_id" value={kelasPilih.id} />
+          <button class="btn text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" title="Hapus kelas"><Icon name="trash" /></button></form>
+      )}
+      <button type="button" class="btn btn-success" @click="exportExcel()"><Icon name="table" /> Export Excel</button>
+    </div>
+
+    <div class="card overflow-hidden">
+      <div class="overflow-x-auto max-h-[70vh]">
+        <table class="w-full min-w-[760px]">
+          <thead class="bg-gray-50 dark:bg-gray-900 sticky top-0 z-10"><tr><th class="th">MK / Kelas</th><th class="th">No PC</th><th class="th">Status</th><th class="th">NIM</th><th class="th">Mahasiswa</th><th class="th">Waktu</th><th class="th text-right">Aksi</th></tr></thead>
+          <tbody class="divide-y divide-gray-100 dark:divide-gray-700/60">
+            {baris.length === 0 && <tr><td colspan="7" class="p-10 text-center text-gray-500">Belum ada kelas. Tambahkan kelas atau buka sesi kontrak.</td></tr>}
+            {baris.map((b) => (
+              <tr x-show={`cocok(${JSON.stringify(`pc ${b.no_pc} ${b.k?.nim ?? ''} ${b.k?.nama ?? ''}`.toLowerCase())})`} class="hover:bg-gray-50/70 dark:hover:bg-gray-700/20">
+                <td class="td"><p class="font-semibold text-sm">{b.mk}</p><p class="text-xs text-gray-500">{b.nama_kelas}</p></td>
+                <td class="td font-black text-blue-600">PC {b.no_pc}</td>
+                <td class="td">{b.k ? <span class="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Terisi</span> : <span class="badge bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">Kosong</span>}</td>
+                <td class="td font-mono text-xs">{b.k?.nim || '-'}</td>
+                <td class="td font-semibold">{b.k?.nama || '-'}</td>
+                <td class="td text-xs text-gray-500">{b.k ? fmtWaktu(b.k.waktu_kontrak) : '-'}{b.k?.ip_address && <span class="block text-[11px] text-gray-400">{b.k.ip_address}</span>}</td>
+                <td class="td text-right whitespace-nowrap">
+                  {b.k && filter !== 'semua' && (
+                    <>
+                      <a href={`/kontrak/tiket/${b.kelas_id}/${b.no_pc}`} target="_blank" class="btn btn-sm btn-ghost" title="Lihat tiket"><Icon name="eye" class="w-3.5 h-3.5" /></a>
+                      <button type="button" class="btn btn-sm btn-ghost" title="Pindah bangku" @click={`modal = 'pindah'; pindah = ${JSON.stringify({ asal: b.no_pc, nama: b.k.nama })}`}><Icon name="swap" class="w-3.5 h-3.5" /></button>
+                      <form method="post" class="inline" onsubmit={`return confirm('Kosongkan secara paksa PC ${b.no_pc}?')`}>
+                        <input type="hidden" name="aksi" value="reset_satu" /><input type="hidden" name="kelas_id" value={b.kelas_id} /><input type="hidden" name="no_pc" value={b.no_pc} />
+                        <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" title="Kosongkan"><Icon name="x" class="w-3.5 h-3.5" /></button></form>
+                    </>
+                  )}
+                  {!b.k && filter !== 'semua' && <button type="button" class="btn btn-sm btn-ghost" @click={`modal = 'manual'; manual = { pc: ${b.no_pc} }`}><Icon name="plus" class="w-3.5 h-3.5" /> Isi manual</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {laporanSelesai.length > 0 && (
+      <details class="card mt-6 group">
+        <summary class="list-none cursor-pointer p-4 font-bold flex items-center justify-between"><span class="flex items-center gap-2"><Icon name="wrench" /> Riwayat Laporan Kerusakan ({laporanSelesai.length})</span><Icon name="chevron" class="w-4 h-4 group-open:rotate-180 transition" /></summary>
+        <div class="px-4 pb-4 divide-y divide-gray-100 dark:divide-gray-700">
+          {laporanSelesai.map((l) => (
+            <div class="py-2 flex items-center gap-3 text-sm">
+              <span class="badge bg-gray-100 dark:bg-gray-700">PC {l.pc}</span><span class="flex-1">{l.kategori} <span class="text-gray-400 text-xs">— {l.deskripsi}</span></span><span class="text-xs text-gray-400">{fmtWaktu(l.waktu)}</span>
+              <form method="post"><input type="hidden" name="aksi" value="hapus_laporan" /><input type="hidden" name="id_laporan" value={l.id} /><button class="p-1 text-gray-400 hover:text-red-500 cursor-pointer"><Icon name="x" class="w-3.5 h-3.5" /></button></form>
+            </div>
+          ))}
+        </div>
+      </details>
+    )}
+
+    <!-- ===== Modal ===== -->
+    <div x-show="modal" x-transition.opacity class="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" @click.self="modal = null" @keydown.escape.window="modal = null">
+      <form method="post" x-show="modal === 'buka'" class="card w-full max-w-md p-6 space-y-4">
+        <h3 class="font-extrabold text-lg">Buka Sesi Kontrak</h3>
+        <input type="hidden" name="aksi" value="buka_baru" />
+        <div @kelas-dipilih="pj = $event.detail?.pj || ''">
+          <label class="label">Mata Kuliah &amp; Kelas (dari jadwal)</label>
+          <KelasPicker name="kontrak_id" mode="kontrak" placeholder="Pilih kelas…" />
+          <p class="text-[11px] text-gray-500 mt-1">Default: kelas yang sedang berlangsung sesuai jadwal.</p>
+        </div>
+        <div><label class="label">Asisten PJ <span class="normal-case font-normal text-gray-400">(otomatis dari jadwal)</span></label>
+          <input name="asisten_pj" class="input" required x-model="pj" list="dl-asisten" autocomplete="off" placeholder="Nama asisten PJ" />
+          <datalist id="dl-asisten">{listAsisten().map((a) => <option value={a.nama} />)}</datalist></div>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary">Buka Sesi</button></div>
+      </form>
+      <form method="post" x-show="modal === 'kelas'" class="card w-full max-w-md p-6 space-y-4">
+        <h3 class="font-extrabold text-lg" x-text="formKelas.aksi === 'edit_kelas' ? 'Edit Kelas' : 'Tambah Kelas Baru'"></h3>
+        <input type="hidden" name="aksi" :value="formKelas.aksi" /><input type="hidden" name="kelas_id" :value="formKelas.id" />
+        <div><label class="label">Mata Kuliah</label><input name="mk" list="opsi-mk" class="input" required x-model="formKelas.mk" />
+          <datalist id="opsi-mk">{opsiMk.map((m) => <option value={m} />)}</datalist></div>
+        <div><label class="label">Nama Kelas (Grup)</label><input name="nama_kelas" class="input" required x-model="formKelas.nama" /></div>
+        <div><label class="label">Nama Koordinator MK (opsional)</label><input name="koordinator_mk" class="input" placeholder="Default: SAQ LABORATORY" x-model="formKelas.koordinator" /></div>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary">Simpan</button></div>
+      </form>
+      <form method="post" x-show="modal === 'manual'" class="card w-full max-w-md p-6 space-y-4">
+        <h3 class="font-extrabold text-lg">Isi Kontrak Manual · PC <span x-text="manual.pc"></span></h3>
+        <input type="hidden" name="aksi" value="isi_manual" /><input type="hidden" name="kelas_id" value={kelasPilih?.id ?? ''} /><input type="hidden" name="no_pc" :value="manual.pc" />
+        <div><label class="label">NIM</label><input name="nim" class="input" required inputmode="numeric" placeholder="202331000" /></div>
+        <div><label class="label">Nama</label><input name="nama" class="input" required placeholder="Nama Lengkap" /></div>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary">Simpan</button></div>
+      </form>
+      <form method="post" x-show="modal === 'pindah'" class="card w-full max-w-md p-6 space-y-4">
+        <h3 class="font-extrabold text-lg">Pindahkan Bangku</h3>
+        <p class="text-sm text-gray-500">Pindahkan <b x-text="pindah.nama"></b> dari <b>PC <span x-text="pindah.asal"></span></b> ke:</p>
+        <input type="hidden" name="aksi" value="pindah" /><input type="hidden" name="kelas_id" value={kelasPilih?.id ?? ''} /><input type="hidden" name="pc_asal" :value="pindah.asal" />
+        <select name="pc_tujuan" class="input" required><option value="">-- Pilih PC kosong --</option>{kosongPc.map((n) => <option value={n}>Bangku PC {n}</option>)}</select>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="modal = null">Batal</button><button class="btn btn-primary">Pindahkan</button></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== Template PDF (tersembunyi) ===== -->
+  <div style="display:none">
+    <div id="pdf-template-tabel" style="padding:30px;background:#fff;color:#0f172a;font-family:'Inter Variable',Arial,sans-serif;width:794px;box-sizing:border-box">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #1e293b;padding-bottom:20px;margin-bottom:30px">
+        <div><h1 style="font-size:26px;font-weight:900;color:#1e293b;margin:0 0 6px;text-transform:uppercase;letter-spacing:2.5px">Data Kontrak Meja</h1>
+          <h2 style="font-size:13px;font-weight:600;color:#64748b;margin:0">Laboratorium Software Architecture &amp; Quality (SAQ) - ITPLN</h2></div>
+        <div style="background:#f1f5f9;border-left:4px solid #3b82f6;padding:6px 14px;font-size:13px;font-weight:800">{namaLaporan}</div>
+      </div>
+      {terisi.length === 0 ? (
+        <div style="text-align:center;padding:50px;background:#f8fafc;border:2px dashed #cbd5e1;color:#94a3b8;font-weight:700">BELUM ADA MAHASISWA YANG MENGISI KONTRAK DI SESI INI</div>
+      ) : (
+        <>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e2e8f0">
+            <thead><tr>
+              <th style="background:#1e293b;color:#fff;padding:12px;text-align:left;text-transform:uppercase;width:28%">Mata Kuliah</th>
+              <th style="background:#1e293b;color:#fff;padding:12px;text-align:center;text-transform:uppercase;width:12%">No PC</th>
+              <th style="background:#1e293b;color:#fff;padding:12px;text-align:left;text-transform:uppercase;width:20%">NIM</th>
+              <th style="background:#1e293b;color:#fff;padding:12px;text-align:left;text-transform:uppercase;width:40%">Nama Praktikan</th>
+            </tr></thead>
+            <tbody>{terisi.map((b, i) => (
+              <tr style={`background:${i % 2 ? '#f8fafc' : '#fff'};border-bottom:1px solid #e2e8f0`}>
+                <td style="padding:12px;font-weight:700;color:#334155">{b.mk}<br /><span style="font-weight:500;color:#64748b;font-size:11px">{b.nama_kelas}</span></td>
+                <td style="padding:12px;text-align:center;font-weight:900;color:#2563eb;font-size:14px">PC {b.no_pc}</td>
+                <td style="padding:12px;font-family:monospace;font-weight:bold;color:#475569">{b.k!.nim}</td>
+                <td style="padding:12px;text-transform:uppercase;letter-spacing:1.5px">{b.k!.nama}</td>
+              </tr>))}</tbody>
+          </table>
+          {kelasPilih?.asisten_pj && (
+            <div style="margin-top:50px;display:flex;justify-content:flex-end" class="pdf-page-avoid"><div style="width:280px;text-align:right">
+              <p style="font-size:12px;color:#64748b;margin-bottom:70px">{tanggalCetak}</p>
+              <p style="font-size:14px;font-weight:900;margin:0;border-bottom:2px solid #0f172a;padding-bottom:4px;text-transform:uppercase;letter-spacing:2px">{kelasPilih.asisten_pj}</p>
+              <p style="font-size:11px;font-weight:700;color:#64748b;margin-top:6px;text-transform:uppercase">Asisten PJ</p>
+            </div></div>
+          )}
+        </>
+      )}
+    </div>
+    <div id="pdf-template-tiket" style="padding:20px 30px;background:#fff;font-family:'Inter Variable',Arial,sans-serif;width:794px;box-sizing:border-box">
+      <div style="text-align:center;margin-bottom:30px;padding-bottom:15px;border-bottom:3px solid #f1f5f9">
+        <h1 style="font-size:26px;font-weight:900;letter-spacing:2px;color:#0f172a;margin:0 0 10px;text-transform:uppercase">Data Kontrak</h1>
+        <span style="display:inline-block;background:#1e293b;color:#fff;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase">{namaLaporan}</span>
+      </div>
+      {terisi.map((b) => (
+        <div class="pdf-page-avoid" style="margin-bottom:24px;border:2px solid #cbd5e1;border-radius:16px;display:flex">
+          <div style="flex:1;padding:22px;border-right:3px dashed #cbd5e1">
+            <div style="display:flex;justify-content:space-between;margin-bottom:16px">
+              <div><div style="font-size:18px;font-weight:900;color:#1e3a8a;text-transform:uppercase">SAQ Laboratory</div><div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">Institut Teknologi PLN</div></div>
+              <div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:4px 10px;border-radius:8px;font-size:10px;font-weight:800;text-transform:uppercase;height:fit-content">Confirmed</div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:12px">
+              <div style="width:47%"><div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Nama Praktikan</div><div style="font-size:14px;font-weight:900;text-transform:uppercase">{b.k!.nama}</div></div>
+              <div style="width:47%"><div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">NIM</div><div style="font-size:16px;font-weight:800;font-family:monospace">{b.k!.nim}</div></div>
+              <div style="width:47%"><div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Mata Kuliah</div><div style="font-size:13px;font-weight:800;color:#334155">{b.mk}</div></div>
+              <div style="width:47%"><div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Kelas</div><div style="font-size:13px;font-weight:800;color:#334155">{b.nama_kelas}</div></div>
+            </div>
+            <p style="font-size:10px;color:#475569;margin:14px 0 0;background:#eff6ff;padding:10px;border-radius:8px">"Saya berjanji menjaga fasilitas <strong>PC {b.no_pc}</strong> di Lab SAQ selama 1 semester. Bertanggung jawab penuh atas kelalaian."</p>
+          </div>
+          <div style="width:180px;padding:22px;background:#f8fafc;text-align:center;border-radius:0 14px 14px 0">
+            <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:2px">Assigned Seat</div>
+            <div style="background:#0f172a;color:#fff;padding:12px;border-radius:14px;margin:10px 0 16px;font-size:28px;font-weight:900">PC {b.no_pc}</div>
+            <div style="font-size:9px;font-family:monospace;color:#94a3b8;letter-spacing:1px">{hashTiket(b.k!.nim, b.k!.waktu_kontrak)}</div>
+            <div style="font-size:10px;font-weight:800;color:#1e293b;margin-top:6px">{fmtWaktu(b.k!.waktu_kontrak)}</div>
+          </div>
+        </div>
+      ))}
+      {kelasPilih?.asisten_pj && <div style="text-align:right;margin-top:20px;font-size:11px;color:#64748b">Diterbitkan secara sah oleh SAQ Lab.<br /><b style="color:#0f172a;text-transform:uppercase">{kelasPilih.asisten_pj}</b><br />Asisten PJ</div>}
+    </div>
+  </div>
+
+  <script is:inline define:vars={{ namaLaporan, adaTerisi: terisi.length > 0 }}>
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('kontrakAdmin', () => ({
+        modal: null, pj: '', cari: '', manual: { pc: 0 }, pindah: { asal: 0, nama: '' }, formKelas: { aksi: 'tambah_kelas', id: '', mk: '', nama: '', koordinator: '' },
+        cocok(teks) { const q = this.cari.trim().toLowerCase(); return !q || teks.includes(q); },
+        exportExcel() {
+          const D = JSON.parse(document.getElementById('excel-data').textContent);
+          const ws = XLSX.utils.json_to_sheet(D.rows);
+          ws['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 30 }, { wch: 20 }];
+          const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Data'); XLSX.writeFile(wb, D.nama + '.xlsx');
+        },
+        pdf(tipe, btn) {
+          if (!adaTerisi && tipe === 'tiket') { alert('Belum ada mahasiswa yang mengisi meja. Tiket tidak dapat dicetak.'); return; }
+          const asli = btn.innerHTML; btn.innerHTML = '⏳ Render PDF…'; btn.disabled = true;
+          const src = document.getElementById(tipe === 'tabel' ? 'pdf-template-tabel' : 'pdf-template-tiket');
+          const wrap = document.createElement('div');
+          Object.assign(wrap.style, { position: 'absolute', top: '0', left: '-9999px', width: '794px', background: '#fff' });
+          const clone = src.cloneNode(true); wrap.appendChild(clone); document.body.appendChild(wrap);
+          const nama = (tipe === 'tabel' ? '[DATA_KONTRAK]_' : '[TIKET]_') + namaLaporan.replace(/[\s/\\]+/g, '_') + '.pdf';
+          html2pdf().set({
+            margin: tipe === 'tabel' ? [15, 0, 15, 0] : [10, 0, 10, 0], filename: nama, image: { type: 'jpeg', quality: 1 },
+            html2canvas: { scale: 2, useCORS: true, windowWidth: 794 },
+            jsPDF: { unit: 'px', format: [794, 1123], orientation: 'portrait' }, pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+          }).from(clone).save().then(() => { wrap.remove(); btn.innerHTML = asli; btn.disabled = false; })
+            .catch((e) => { console.error(e); wrap.remove(); btn.innerHTML = asli; btn.disabled = false; alert('Terjadi kesalahan saat memproses PDF.'); });
+        },
+      }));
+    });
+  </script>
+</AdminLayout>

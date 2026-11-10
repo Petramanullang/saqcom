@@ -1,0 +1,45 @@
+---
+import '../../styles/global.css';
+import '../../styles/kontrak.css';
+import tpl from '../../legacy/kontrak-user.html?raw';
+import { kelasAktif, petaKursi, isiTemplate } from '../../lib/kontrak';
+
+const { pc, settings } = Astro.locals;
+const aktif = kelasAktif();
+// Ambil cabang yang sesuai dari template lama: sesi tutup vs sesi berjalan
+const [sebelum, sisa] = tpl.split('<!--IF_TUTUP-->');
+const [cabangTutup, sisa2] = sisa.split('<!--ELSE-->');
+const [cabangBuka, sesudah] = sisa2.split('<!--ENDIF-->');
+const html = isiTemplate(sebelum + (aktif ? cabangBuka : cabangTutup) + sesudah, {
+  MK: aktif?.mk ?? '',
+  KELAS: aktif?.nama ?? '',
+}, {
+  PC: String(pc),
+  JUMLAH_PC: String(settings.jumlahPc),
+  DATA: JSON.stringify(aktif ? petaKursi(aktif.id, settings.jumlahPc) : {}).replace(/</g, '\\u003c'),
+});
+const laporN = parseInt(Astro.url.searchParams.get('lapor') || '', 10);
+const lapor = Number.isInteger(laporN) && laporN > 0 ? laporN : 0;
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kontrak Tempat Duduk - SAQ LAB</title>
+    <link rel="icon" type="image/webp" href="/img/lab-saql.webp" />
+    <script is:inline src="/vendor/sweetalert2.min.js"></script>
+  </head>
+  <body class="min-h-screen pb-20 overflow-x-hidden">
+    <a href="/" class="absolute top-6 left-6 z-40 px-4 py-2.5 rounded-2xl dynamic-bg border shadow-lg text-xs font-black uppercase tracking-widest dynamic-text hover:scale-105 transition-transform">&larr; Beranda</a>
+    <Fragment set:html={html} />
+    {lapor && (
+      <script is:inline define:vars={{ pcLapor: lapor }}>
+        document.addEventListener('DOMContentLoaded', () => {
+          Swal.fire({ title: 'Laporan Terkirim!', text: `Asisten/Teknisi akan segera mengecek PC ${pcLapor}.`, icon: 'success', background: '#1e293b', color: '#f8fafc', confirmButtonColor: '#3b82f6' });
+          history.replaceState(null, '', '/kontrak');
+        });
+      </script>
+    )}
+  </body>
+</html>

@@ -1,0 +1,334 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import Icon from '../../../components/Icon.astro';
+import { all, get, run } from '../../../lib/db';
+import { listKelas, getKelas, listSesi, getSesi, rosterKelas, simpanRoster, hitungUlangTerlambat } from '../../../lib/tugas';
+import KelasPicker from '../../../components/KelasPicker.astro';
+import { getJadwal, kelasHariIni, labelKelas, labelWaktu, jamSelesai } from '../../../lib/jadwal';
+import { flashUrl, str, int, nowWib, fromDatetimeLocal, toDatetimeLocal, fmtWaktu, hexToRgb, amanPath } from '../../../lib/util';
+
+const url = Astro.url;
+let kelasId = parseInt(url.searchParams.get('kelas') || '', 10);
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = str(form.get('aksi'));
+  const kid = int(form.get('kelas_id'));
+  const back = (hash = '') => `/admin/tugas/kelas${kid ? `?kelas=${kid}` : ''}`;
+  const ok = (m: string, hash = '') => Astro.redirect(flashUrl(back(), 'ok', m) + hash);
+  const err = (m: string, hash = '') => Astro.redirect(flashUrl(back(), 'err', m) + hash);
+  try {
+    switch (aksi) {
+      case 'kelas_simpan': {
+        const nama = amanPath(str(form.get('nama')).replace(/\s+/g, '_'), 60);
+        const warna = /^#[0-9a-f]{6}$/i.test(str(form.get('warna'))) ? str(form.get('warna')) : '#3b82f6';
+        if (nama.length < 2) return err('Nama kelas wajib diisi.');
+        if (kid) {
+          run('UPDATE kelas_tugas SET nama = ?, warna = ? WHERE id = ?', nama, warna, kid);
+          return ok('Kelas diperbarui.');
+        }
+        const urutan = (get<{ m: number }>('SELECT COALESCE(MAX(urutan),0)+1 m FROM kelas_tugas')!.m);
+        const r = run('INSERT INTO kelas_tugas(nama, warna, urutan) VALUES (?,?,?)', nama, warna, urutan);
+        return Astro.redirect(flashUrl(`/admin/tugas/kelas?kelas=${r.lastInsertRowid}`, 'ok', `Kelas ${nama} ditambahkan.`));
+      }
+      case 'kelas_toggle':
+        run('UPDATE kelas_tugas SET aktif = 1 - aktif WHERE id = ?', kid);
+        return ok('Status kelas diubah.');
+      case 'kelas_hapus': {
+        const n = get<{ c: number }>('SELECT COUNT(*) c FROM submission WHERE kelas_id = ?', kid)!.c;
+        if (n > 0 && str(form.get('konfirmasi')).toUpperCase() !== 'HAPUS') return err(`Kelas ini punya ${n} pengumpulan. Ketik HAPUS untuk konfirmasi.`);
+        run('DELETE FROM kelas_tugas WHERE id = ?', kid);
+        return Astro.redirect(flashUrl('/admin/tugas/kelas', 'ok', 'Kelas dihapus. (File tugas tetap ada di folder data/uploads.)'));
+      }
+      case 'sesi_simpan': {
+        const sid = int(form.get('sesi_id'));
+        const judul = str(form.get('judul')).slice(0, 120);
+        if (!judul) return err('Judul tugas wajib diisi.', '#sesi');
+        const deadline = fromDatetimeLocal(str(form.get('deadline')));
+        const tolak = form.get('tolak_terlambat') ? 1 : 0;
+        if (sid) {
+          run('UPDATE sesi_tugas SET judul = ?, deadline = ?, tolak_terlambat = ? WHERE id = ?', judul, deadline, tolak, sid);
+          hitungUlangTerlambat(sid);
+          return ok('Tugas diperbarui.', '#sesi');
+        }
+        run('INSERT INTO sesi_tugas(kelas_id, judul, deadline, tolak_terlambat, dibuka, created_at) VALUES (?,?,?,?,1,?)', kid, judul, deadline, tolak, nowWib());
+        return ok(`Tugas "${judul}" dibuka untuk mahasiswa.`, '#sesi');
+      }
+      case 'sesi_toggle': {
+        const s = getSesi(int(form.get('sesi_id')));
+        if (s) run('UPDATE sesi_tugas SET dibuka = 1 - dibuka WHERE id = ?', s.id);
+        return ok(s?.dibuka ? 'Pengumpulan ditutup.' : 'Pengumpulan dibuka kembali.', '#sesi');
+      }
+      case 'sesi_hapus':
+        run('DELETE FROM sesi_tugas WHERE id = ?', int(form.get('sesi_id')));
+        return ok('Tugas dihapus. Pengumpulan yang sudah masuk dipindah ke "Umum".', '#sesi');
+      case 'roster_kontrak': {
+        const kontrakId = str(form.get('kontrak_id'));
+        const rows = all<{ nim: string; nama: string }>('SELECT nim, nama FROM kontrak_kursi WHERE kelas_id = ?', kontrakId);
+        if (!rows.length) return err('Kelas kontrak tersebut belum punya data mahasiswa.', '#mahasiswa');
+        const n = simpanRoster(kid, rows, 'kontrak', !!form.get('ganti'));
+        return ok(`${n} mahasiswa diambil dari data Kontrak.`, '#mahasiswa');
+      }
+      case 'roster_import': {
+        let rows: { nim: string; nama: string }[] = [];
+        const json = str(form.get('rows_json'));
+        const teks = str(form.get('teks'));
+        if (json) {
+          try { rows = JSON.parse(json); } catch { return err('Data Excel tidak terbaca.', '#mahasiswa'); }
+        } else if (teks) {
+          rows = teks.split(/\r?\n/).map((l) => {
+            const m = l.match(/(\d{5,15})[\s,;\t|_-]*(.*)/);
+            return m ? { nim: m[1], nama: m[2].replace(/^[,;\t|]+/, '').trim() } : null;
+          }).filter(Boolean) as any;
+        }
+        if (!rows.length) return err('Tidak ada baris NIM yang valid.', '#mahasiswa');
+        const n = simpanRoster(kid, rows, json ? 'excel' : 'manual', !!form.get('ganti'));
+        return ok(`${n} mahasiswa disimpan.`, '#mahasiswa');
+      }
+      case 'roster_hapus':
+        run('DELETE FROM mahasiswa_kelas WHERE kelas_id = ? AND nim = ?', kid, str(form.get('nim')));
+        return ok('Mahasiswa dihapus dari daftar.', '#mahasiswa');
+      case 'roster_kosongkan':
+        run('DELETE FROM mahasiswa_kelas WHERE kelas_id = ?', kid);
+        return ok('Daftar mahasiswa dikosongkan.', '#mahasiswa');
+    }
+  } catch (e: any) {
+    if (String(e?.message).includes('UNIQUE')) return err('Nama kelas sudah dipakai.');
+    throw e;
+  }
+  return Astro.redirect(back());
+}
+
+const kelasList = listKelas();
+if (!Number.isFinite(kelasId)) {
+  const def = kelasHariIni().defaultJadwalId;
+  kelasId = (def && kelasList.find((k) => k.jadwal_id === def)?.id) || kelasList.find((k) => k.aktif)?.id || kelasList[0]?.id;
+}
+const kelas = Number.isFinite(kelasId) ? getKelas(kelasId) : undefined;
+const jadwalKelas = kelas?.jadwal_id ? getJadwal(kelas.jadwal_id) : undefined;
+const nonaktif = kelasList.filter((k) => !k.aktif);
+const kontrakTerkait = kelas?.jadwal_id ? get<{ id: string }>('SELECT id FROM kontrak_kelas WHERE jadwal_id = ? ORDER BY created_at DESC LIMIT 1', kelas.jadwal_id)?.id : undefined;
+const sesi = kelas ? listSesi(kelas.id) : [];
+const hitungSesi = new Map(all<{ sesi_id: number; c: number; t: number }>(
+  'SELECT sesi_id, COUNT(DISTINCT nim) c, SUM(terlambat) t FROM submission WHERE kelas_id = ? AND sesi_id IS NOT NULL GROUP BY sesi_id', kelas?.id ?? 0,
+).map((r) => [r.sesi_id, r]));
+const roster = kelas ? rosterKelas(kelas.id) : [];
+const kontrakKelas = all<{ id: string; mk: string; nama: string; n: number }>(
+  'SELECT k.id, k.mk, k.nama, (SELECT COUNT(*) FROM kontrak_kursi c WHERE c.kelas_id = k.id) n FROM kontrak_kelas k ORDER BY k.mk, k.nama',
+);
+const now = nowWib();
+---
+<AdminLayout title="Tugas, Deadline & Mahasiswa" active="kelas" alpine scripts={['/vendor/xlsx.full.min.js']}>
+  <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+    <div>
+      <a href="/admin/tugas" class="text-xs font-semibold text-blue-600 inline-flex items-center gap-1"><Icon name="arrowLeft" class="w-3.5 h-3.5" /> Tugas Masuk</a>
+      <h1 class="text-2xl font-extrabold tracking-tight">Kelas, Sesi &amp; Mahasiswa</h1>
+      <p class="text-sm text-gray-500">Atur kelas upload, tugas per pertemuan + deadline, dan daftar mahasiswa tiap kelas.</p>
+    </div>
+  </div>
+
+  <div class="grid lg:grid-cols-12 gap-6">
+    <!-- Daftar kelas -->
+    <aside class="lg:col-span-4 space-y-4">
+      <div class="card p-4" @kelas-dipilih={`$event.detail && $event.detail.value !== '${kelas?.id ?? ''}' && (location.href = '?kelas=' + $event.detail.value)`} x-data>
+        <p class="label">Pilih kelas</p>
+        <KelasPicker name="kelas" mode="kelasTugas" manual value={kelas?.id ?? ''} tanpaDefault />
+        <p class="text-[11px] text-gray-500 mt-2">Kelas otomatis dibuat dari <a href="/admin/jadwal" class="text-blue-600 font-semibold">Jadwal Semester</a>. Default: kelas yang sedang berlangsung.</p>
+      </div>
+      {nonaktif.length > 0 && (
+        <details class="card p-3 group">
+          <summary class="list-none cursor-pointer px-2 py-1 text-xs font-bold text-gray-500 flex justify-between">Kelas nonaktif / semester lama ({nonaktif.length})<Icon name="chevron" class="w-3.5 h-3.5 group-open:rotate-180" /></summary>
+          <div class="mt-2 space-y-1 max-h-64 overflow-y-auto">
+            {nonaktif.map((k) => <a href={`?kelas=${k.id}`} class:list={['block px-3 py-1.5 rounded-lg text-xs truncate hover:bg-gray-50 dark:hover:bg-gray-700/50', k.id === kelas?.id && 'bg-gray-100 dark:bg-gray-700 font-bold']}>{k.nama}</a>)}
+          </div>
+        </details>
+      )}
+      <form method="post" class="card p-4 space-y-3">
+        <p class="font-bold text-sm flex items-center gap-2"><Icon name="plus" /> Kelas tambahan (manual)</p>
+        <p class="text-[11px] text-gray-500 -mt-1">Untuk kelas pengganti / gabungan di luar jadwal. Muncul di grup "Kelas tambahan" pada form upload.</p>
+        <input type="hidden" name="aksi" value="kelas_simpan" />
+        <input name="nama" class="input" placeholder="Contoh: Kelas Pengganti ALPRO C" required />
+        <div class="flex gap-2"><input type="color" name="warna" value="#3b82f6" class="h-10 w-14 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent cursor-pointer" /><button class="btn btn-primary flex-1">Simpan</button></div>
+      </form>
+    </aside>
+
+    {kelas ? (
+      <section class="lg:col-span-8 space-y-6">
+        <!-- Info kelas -->
+        <div class="card p-5" x-data="{ edit: false }">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="w-10 h-10 rounded-2xl" style={`background:rgba(${hexToRgb(kelas.warna)},.15);border:2px solid ${kelas.warna}`}></span>
+            <div class="flex-1 min-w-0">
+              <h2 class="text-lg font-extrabold truncate">{jadwalKelas ? labelKelas(jadwalKelas) : kelas.nama}</h2>
+              {jadwalKelas ? (
+                <p class="text-xs text-gray-500">{labelWaktu(jadwalKelas)}–{jamSelesai(jadwalKelas)} · {jadwalKelas.nama_dosen} · PJ {jadwalKelas.asisten[0] ?? '-'}{kelas.aktif ? '' : ' · semester tidak aktif'}</p>
+              ) : (
+                <p class="text-xs text-gray-500">{kelas.aktif ? 'Kelas manual — tampil di form upload' : 'Disembunyikan dari form upload'}</p>
+              )}
+            </div>
+            <a href={`/admin/tugas?kelas=${kelas.id}`} class="btn btn-sm btn-ghost"><Icon name="inbox" class="w-3.5 h-3.5" /> Lihat tugas</a>
+            {jadwalKelas ? <a href="/admin/jadwal" class="btn btn-sm btn-ghost"><Icon name="table" class="w-3.5 h-3.5" /> Ubah di Jadwal</a> : <button type="button" class="btn btn-sm btn-ghost" @click="edit = !edit"><Icon name="pencil" class="w-3.5 h-3.5" /> Edit</button>}
+            {!jadwalKelas && <form method="post"><input type="hidden" name="aksi" value="kelas_toggle" /><input type="hidden" name="kelas_id" value={kelas.id} />
+              <button class="btn btn-sm btn-ghost">{kelas.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button></form>}
+            <form method="post" onsubmit="const k = prompt('Hapus kelas ini? Ketik HAPUS jika kelas sudah punya pengumpulan.'); if (k === null) return false; this.konfirmasi.value = k;">
+              <input type="hidden" name="aksi" value="kelas_hapus" /><input type="hidden" name="kelas_id" value={kelas.id} /><input type="hidden" name="konfirmasi" />
+              <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+          </div>
+          <form method="post" x-show="edit" class="mt-4 flex flex-wrap gap-2">
+            <input type="hidden" name="aksi" value="kelas_simpan" /><input type="hidden" name="kelas_id" value={kelas.id} />
+            <input name="nama" value={kelas.nama} class="input flex-1 min-w-[200px]" required />
+            <input type="color" name="warna" value={kelas.warna} class="h-10 w-14 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent cursor-pointer" />
+            <button class="btn btn-primary">Simpan</button>
+          </form>
+        </div>
+
+        <!-- Sesi / tugas -->
+        <div class="card p-5" id="sesi">
+          <div class="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 class="font-extrabold flex items-center gap-2"><Icon name="calendar" /> Tugas / Pertemuan</h3>
+              <p class="text-xs text-gray-500">Tugas yang <b>dibuka</b> muncul di form upload. Jika tidak ada yang dibuka, mahasiswa mengumpulkan ke "Umum".</p>
+            </div>
+          </div>
+          <form method="post" class="grid sm:grid-cols-12 gap-2 items-end p-3 rounded-2xl bg-gray-50 dark:bg-gray-900/40 mb-4">
+            <input type="hidden" name="aksi" value="sesi_simpan" /><input type="hidden" name="kelas_id" value={kelas.id} />
+            <div class="sm:col-span-5"><label class="label">Judul</label><input name="judul" class="input" placeholder="Pertemuan 5 — Linked List" required /></div>
+            <div class="sm:col-span-4"><label class="label">Deadline (opsional)</label><input type="datetime-local" name="deadline" class="input" /></div>
+            <div class="sm:col-span-3"><button class="btn btn-primary w-full"><Icon name="plus" /> Buka Tugas</button></div>
+            <label class="sm:col-span-12 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><input type="checkbox" name="tolak_terlambat" class="accent-blue-600" /> <span>Tolak upload setelah deadline (jika tidak dicentang, tetap diterima tapi ditandai <b>terlambat</b>)</span></label>
+          </form>
+          {sesi.length === 0 && <p class="text-sm text-gray-500 text-center py-6">Belum ada tugas untuk kelas ini.</p>}
+          <div class="space-y-2">
+            {sesi.map((s) => {
+              const h = hitungSesi.get(s.id);
+              const lewat = s.deadline && now > s.deadline;
+              return (
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-3.5" x-data="{ edit: false }">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class:list={['badge', s.dibuka ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300']}>{s.dibuka ? 'Dibuka' : 'Ditutup'}</span>
+                    <p class="font-bold flex-1 min-w-[160px]">{s.judul}</p>
+                    <a href={`/admin/tugas?kelas=${kelas.id}&sesi=${s.id}`} class="text-xs font-semibold text-blue-600">{h?.c ?? 0} mahasiswa{h?.t ? ` · ${h.t} terlambat` : ''} →</a>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2 mt-2">
+                    <p class:list={['text-xs flex-1', lewat ? 'text-red-600' : 'text-gray-500']}>
+                      {s.deadline ? <>Deadline: <b>{fmtWaktu(s.deadline)}</b>{lewat ? ' (sudah lewat)' : ''}</> : 'Tanpa deadline'}{s.tolak_terlambat ? ' · tolak terlambat' : ''}
+                    </p>
+                    <button type="button" class="btn btn-sm btn-ghost" @click="edit = !edit"><Icon name="pencil" class="w-3.5 h-3.5" /></button>
+                    <form method="post"><input type="hidden" name="aksi" value="sesi_toggle" /><input type="hidden" name="kelas_id" value={kelas.id} /><input type="hidden" name="sesi_id" value={s.id} />
+                      <button class:list={['btn btn-sm', s.dibuka ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300']}>
+                        <Icon name={s.dibuka ? 'lock' : 'unlock'} class="w-3.5 h-3.5" />{s.dibuka ? 'Tutup' : 'Buka'}</button></form>
+                    <form method="post" onsubmit="return confirm('Hapus tugas ini? Pengumpulan yang sudah masuk tidak ikut terhapus.')">
+                      <input type="hidden" name="aksi" value="sesi_hapus" /><input type="hidden" name="kelas_id" value={kelas.id} /><input type="hidden" name="sesi_id" value={s.id} />
+                      <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+                  </div>
+                  <form method="post" x-show="edit" class="grid sm:grid-cols-12 gap-2 items-end mt-3">
+                    <input type="hidden" name="aksi" value="sesi_simpan" /><input type="hidden" name="kelas_id" value={kelas.id} /><input type="hidden" name="sesi_id" value={s.id} />
+                    <div class="sm:col-span-5"><input name="judul" value={s.judul} class="input" required /></div>
+                    <div class="sm:col-span-4"><input type="datetime-local" name="deadline" value={toDatetimeLocal(s.deadline)} class="input" /></div>
+                    <div class="sm:col-span-3"><button class="btn btn-primary w-full">Simpan</button></div>
+                    <label class="sm:col-span-12 flex items-center gap-2 text-xs"><input type="checkbox" name="tolak_terlambat" checked={!!s.tolak_terlambat} class="accent-blue-600" /> Tolak upload setelah deadline</label>
+                  </form>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <!-- Mahasiswa -->
+        <div class="card p-5" id="mahasiswa" x-data="rosterImport">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 class="font-extrabold flex items-center gap-2"><Icon name="users" /> Daftar Mahasiswa <span class="badge bg-gray-100 dark:bg-gray-700">{roster.length}</span></h3>
+              <p class="text-xs text-gray-500">Dipakai untuk fitur "siapa yang belum mengumpulkan".</p>
+            </div>
+            {roster.length > 0 && (
+              <form method="post" onsubmit="return confirm('Kosongkan seluruh daftar mahasiswa kelas ini?')">
+                <input type="hidden" name="aksi" value="roster_kosongkan" /><input type="hidden" name="kelas_id" value={kelas.id} />
+                <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /> Kosongkan</button></form>
+            )}
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-3 mb-5">
+            <form method="post" class="p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-2">
+              <p class="text-sm font-bold">1 · Dari data Kontrak</p>
+              <input type="hidden" name="aksi" value="roster_kontrak" /><input type="hidden" name="kelas_id" value={kelas.id} />
+              <select name="kontrak_id" class="input" required>
+                <option value="">Pilih kelas kontrak…</option>
+                {kontrakKelas.map((k) => <option value={k.id} selected={k.id === kontrakTerkait}>{k.mk} — {k.nama} ({k.n} mhs)</option>)}
+              </select>
+              <label class="flex items-center gap-2 text-xs"><input type="checkbox" name="ganti" class="accent-blue-600" /> Ganti daftar lama</label>
+              <button class="btn btn-primary btn-sm w-full" disabled={!kontrakKelas.length}>Ambil</button>
+            </form>
+            <form method="post" class="p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-2" x-ref="formExcel">
+              <p class="text-sm font-bold">2 · Import Excel / CSV</p>
+              <input type="hidden" name="aksi" value="roster_import" /><input type="hidden" name="kelas_id" value={kelas.id} />
+              <input type="hidden" name="rows_json" x-ref="rows" />
+              <input type="file" accept=".xlsx,.xls,.csv" class="block w-full text-xs file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 dark:file:bg-gray-700 file:font-semibold" @change="baca($event)" />
+              <p class="text-[11px] text-gray-500" x-text="info || 'Kolom berisi NIM & Nama (judul kolom bebas).'"></p>
+              <label class="flex items-center gap-2 text-xs"><input type="checkbox" name="ganti" class="accent-blue-600" /> Ganti daftar lama</label>
+              <button class="btn btn-primary btn-sm w-full" :disabled="!jumlah">Simpan <span x-show="jumlah" x-text="'(' + jumlah + ')'"></span></button>
+            </form>
+            <form method="post" class="p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-2">
+              <p class="text-sm font-bold">3 · Tempel teks</p>
+              <input type="hidden" name="aksi" value="roster_import" /><input type="hidden" name="kelas_id" value={kelas.id} />
+              <textarea name="teks" rows="3" class="input font-mono !text-xs" placeholder={'202331070 Muhammad Ridzieq\n202331071, Siti Aminah'} required></textarea>
+              <label class="flex items-center gap-2 text-xs"><input type="checkbox" name="ganti" class="accent-blue-600" /> Ganti daftar lama</label>
+              <button class="btn btn-primary btn-sm w-full">Simpan</button>
+            </form>
+          </div>
+
+          {roster.length > 0 && (
+            <div class="max-h-96 overflow-y-auto rounded-xl border border-gray-100 dark:border-gray-700">
+              <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-900/50 sticky top-0"><tr><th class="th">NIM</th><th class="th">Nama</th><th class="th">Sumber</th><th class="th"></th></tr></thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700/60">
+                  {roster.map((m) => (
+                    <tr>
+                      <td class="px-4 py-2 font-mono text-xs">{m.nim}</td>
+                      <td class="px-4 py-2">{m.nama || '-'}</td>
+                      <td class="px-4 py-2"><span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">{m.sumber}</span></td>
+                      <td class="px-4 py-2 text-right"><form method="post"><input type="hidden" name="aksi" value="roster_hapus" /><input type="hidden" name="kelas_id" value={kelas.id} /><input type="hidden" name="nim" value={m.nim} />
+                        <button class="p-1 text-gray-400 hover:text-red-500 cursor-pointer" aria-label="Hapus"><Icon name="x" class="w-3.5 h-3.5" /></button></form></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+    ) : (
+      <section class="lg:col-span-8 card p-10 text-center text-gray-500">Tambahkan kelas terlebih dahulu.</section>
+    )}
+  </div>
+
+  <script is:inline>
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('rosterImport', () => ({
+        jumlah: 0, info: '',
+        baca(e) {
+          const file = e.target.files[0]; if (!file) return;
+          const r = new FileReader();
+          r.onload = (ev) => {
+            try {
+              const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+              const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false });
+              const out = [];
+              for (const row of rows) {
+                const cells = (row || []).map((c) => String(c ?? '').trim());
+                const iNim = cells.findIndex((c) => /^\d{5,15}$/.test(c.replace(/\s/g, '')));
+                if (iNim < 0) continue;
+                const nama = cells.find((c, i) => i !== iNim && /[a-zA-Z]{2,}/.test(c)) || '';
+                out.push({ nim: cells[iNim].replace(/\s/g, ''), nama });
+              }
+              this.jumlah = out.length;
+              this.info = out.length ? `${out.length} baris NIM terbaca dari ${file.name}` : 'Tidak menemukan kolom NIM.';
+              this.$refs.rows.value = JSON.stringify(out);
+            } catch (err) { this.info = 'Gagal membaca file: ' + err.message; this.jumlah = 0; }
+          };
+          r.readAsArrayBuffer(file);
+        },
+      }));
+    });
+  </script>
+</AdminLayout>

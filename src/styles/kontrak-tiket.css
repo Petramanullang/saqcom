@@ -1,0 +1,15 @@
+
+        body { font-family: 'Inter', sans-serif; background-color: #020617; background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #020617 70%); color: #f8fafc; }
+        .mono { font-family: 'Space Mono', monospace; }
+        
+        /* UI Tiket di Layar Browser */
+        .ticket-container { background: #ffffff; color: #0f172a; position: relative; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5), 0 0 40px rgba(59, 130, 246, 0.2); }
+        .ticket-divider { position: relative; background-image: linear-gradient(to bottom, #cbd5e1 50%, transparent 50%); background-size: 2px 16px; background-repeat: repeat-y; width: 2px; }
+        .ticket-divider::before, .ticket-divider::after { content: ''; position: absolute; left: -11px; width: 24px; height: 24px; background-color: #020617; border-radius: 50%; }
+        .ticket-divider::before { top: -12px; } .ticket-divider::after { bottom: -12px; }
+        
+        .barcode { height: 60px; width: 100%; background-image: repeating-linear-gradient(to right, #0f172a 0, #0f172a 2px, transparent 2px, transparent 4px, #0f172a 4px, #0f172a 5px, transparent 5px, transparent 8px, #0f172a 8px, #0f172a 12px, transparent 12px, transparent 14px, #0f172a 14px, #0f172a 15px, transparent 15px, transparent 19px ); }
+        
+        @keyframes slideIn { from { opacity: 0; transform: translateY(30px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .animate-ticket { animation: slideIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    

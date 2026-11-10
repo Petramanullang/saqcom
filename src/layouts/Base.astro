@@ -1,0 +1,70 @@
+---
+import '../styles/global.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  active?: string;
+  /** Muat Alpine.js (untuk halaman interaktif). */
+  alpine?: boolean;
+  /** Tanpa header & footer (layar penuh: timer, tiket). */
+  bare?: boolean;
+  /** Lebar konten: 'xl' (default 7xl) atau 'full'. */
+  width?: 'xl' | 'full';
+  scripts?: string[];
+}
+const { title, active, alpine = false, bare = false, width = 'xl', scripts = [] } = Astro.props;
+const flashOk = Astro.url.searchParams.get('ok');
+const flashErr = Astro.url.searchParams.get('err');
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} - SAQ LAB</title>
+    <link rel="icon" type="image/webp" href="/img/lab-saql.webp" />
+    <script is:inline>
+      try { if (localStorage.getItem('darkMode') === 'enabled') document.documentElement.classList.add('dark'); } catch (e) {}
+    </script>
+    {scripts.map((s) => <script is:inline src={s}></script>)}
+    {alpine && <script is:inline defer src="/vendor/alpine.min.js"></script>}
+    <slot name="head" />
+  </head>
+  <body class="min-h-screen flex flex-col">
+    {!bare && <Header active={active} />}
+    <main class:list={['flex-1 w-full', bare ? '' : width === 'full' ? 'px-3 sm:px-6 lg:px-8 py-6' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8']}>
+      {(flashOk || flashErr) && (
+        <div data-flash class:list={['mb-6 p-4 border-l-4 rounded-xl text-sm flex items-start justify-between gap-4 shadow-sm',
+          flashOk ? 'bg-green-50 dark:bg-green-900/20 border-green-500 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-900/20 border-red-500 text-red-800 dark:text-red-200']}>
+          <span>{flashOk || flashErr}</span>
+          <button type="button" class="font-bold opacity-60 hover:opacity-100 cursor-pointer" onclick="this.parentElement.remove()">&times;</button>
+        </div>
+      )}
+      <slot />
+    </main>
+    {!bare && <Footer />}
+    <script is:inline>
+      (function () {
+        document.querySelectorAll('[data-theme-toggle]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var d = document.documentElement.classList.toggle('dark');
+            try { localStorage.setItem('darkMode', d ? 'enabled' : 'disabled'); } catch (e) {}
+          });
+        });
+        // Tutup dropdown <details> saat klik di luar
+        document.addEventListener('click', function (e) {
+          document.querySelectorAll('details[data-dropdown][open]').forEach(function (d) {
+            if (!d.contains(e.target)) d.removeAttribute('open');
+          });
+        });
+        // Bersihkan ?ok= / ?err= dari URL agar tidak muncul lagi saat refresh
+        if (location.search.match(/[?&](ok|err)=/)) {
+          var u = new URL(location.href); u.searchParams.delete('ok'); u.searchParams.delete('err');
+          history.replaceState(null, '', u.pathname + u.search + u.hash);
+        }
+      })();
+    </script>
+  </body>
+</html>

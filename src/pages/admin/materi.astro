@@ -1,0 +1,183 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import KelasPicker from '../../components/KelasPicker.astro';
+import { getJadwal, listJadwal, labelKelas, HARI } from '../../lib/jadwal';
+import { all, get, run } from '../../lib/db';
+import {
+  listGrupMateri, grupDariJadwal, simpanFileMateri, hapusFileMateri, tambahMateri, bersihkanGrupKosong,
+  MateriError, type Materi,
+} from '../../lib/materi';
+import { flashUrl, str, int, fmtUkuran, fmtWaktu } from '../../lib/util';
+
+interface Mk { id: number; nama_matkul: string; jurusan: string; semester: number; sks: number }
+interface Ds { id: number; nama_dosen: string; jurusan: string }
+const matkul = all<Mk>('SELECT * FROM matkul ORDER BY nama_matkul');
+const dosen = all<Ds>('SELECT * FROM dosen ORDER BY nama_dosen');
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = str(form.get('aksi'));
+  const back = '/admin/materi';
+  try {
+    if (aksi === 'tambah' || aksi === 'edit') {
+      const jadwal = getJadwal(int(form.get('jadwal_id')));
+      const judul = str(form.get('judul')).slice(0, 150);
+      let grupId: number;
+      if (jadwal) {
+        if (!judul) return Astro.redirect(flashUrl(back, 'err', 'Judul materi wajib diisi.'));
+        grupId = grupDariJadwal(jadwal);
+      } else {
+        // Materi lama (tanpa jadwal) yang diedit tetap di grupnya
+        const g = int(form.get('grup_lama'));
+        if (aksi !== 'edit' || !g || !judul) return Astro.redirect(flashUrl(back, 'err', 'Pilih kelas dari jadwal dan isi judul materi.'));
+        grupId = g;
+      }
+      const file = form.get('file');
+      if (aksi === 'tambah') {
+        if (!(file instanceof File) || !file.size) return Astro.redirect(flashUrl(back, 'err', 'Pilih file materi.'));
+        tambahMateri(grupId, judul, await simpanFileMateri(file));
+        return Astro.redirect(flashUrl(back, 'ok', 'Materi berhasil diupload.'));
+      }
+      const id = int(form.get('materi_id'));
+      const lama = get<Materi>('SELECT * FROM materi WHERE id = ?', id);
+      if (!lama) return Astro.redirect(flashUrl(back, 'err', 'Materi tidak ditemukan.'));
+      if (file instanceof File && file.size) {
+        const baru = await simpanFileMateri(file);
+        hapusFileMateri(lama.nama_file);
+        run('UPDATE materi SET grup_id = ?, judul_materi = ?, nama_file = ?, nama_asli = ?, ukuran = ? WHERE id = ?', grupId, judul, baru.nama_file, baru.nama_asli, baru.ukuran, id);
+      } else {
+        run('UPDATE materi SET grup_id = ?, judul_materi = ? WHERE id = ?', grupId, judul, id);
+      }
+      bersihkanGrupKosong();
+      return Astro.redirect(flashUrl(back, 'ok', 'Informasi materi berhasil diperbarui.'));
+    }
+    if (aksi === 'hapus') {
+      const m = get<Materi>('SELECT * FROM materi WHERE id = ?', int(form.get('materi_id')));
+      if (m) { run('DELETE FROM materi WHERE id = ?', m.id); hapusFileMateri(m.nama_file); bersihkanGrupKosong(); }
+      return Astro.redirect(flashUrl(back, 'ok', 'Materi berhasil dihapus.'));
+    }
+    if (aksi === 'kunci') {
+      run('UPDATE materi_grup SET is_locked = 1 - is_locked WHERE id = ?', int(form.get('grup_id')));
+      return Astro.redirect(flashUrl(back, 'ok', 'Status akses materi berhasil diubah.'));
+    }
+  } catch (e) {
+    if (e instanceof MateriError) return Astro.redirect(flashUrl(back, 'err', e.message));
+    throw e;
+  }
+  return Astro.redirect(back);
+}
+
+const grup = listGrupMateri()
+  .filter((g) => g.materi.length)
+  .sort((a, b) => Math.max(...b.materi.map((m) => m.id)) - Math.max(...a.materi.map((m) => m.id)));
+const total = grup.reduce((a, g) => a + g.materi.length, 0);
+const { settings } = Astro.locals;
+const jadwalAktif = listJadwal();
+---
+<AdminLayout title="Kelola Materi" active="materi_admin" alpine>
+  <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center"><Icon name="book" class="w-5 h-5" /></div>
+      <div><h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Upload Materi</h1><p class="text-sm text-gray-500">Upload dan kelola berkas materi praktikum</p></div>
+    </div>
+    <a href="/materi" target="_blank" class="btn btn-ghost"><Icon name="eye" /> Tampilan Praktikan</a>
+  </div>
+
+  {jadwalAktif.length === 0 && (
+    <div class="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 text-sm text-amber-800 dark:text-amber-200">
+      Belum ada jadwal di semester aktif. Isi dulu <a class="font-bold underline" href="/admin/jadwal">Jadwal Semester</a>.
+    </div>
+  )}
+
+  <div class="grid lg:grid-cols-3 gap-6 mb-8">
+    <form method="post" enctype="multipart/form-data" class="lg:col-span-2 card p-6 space-y-4">
+      <input type="hidden" name="aksi" value="tambah" />
+      <h2 class="font-extrabold flex items-center gap-2"><Icon name="upload" /> Upload Materi Baru</h2>
+      <div x-data="{ k: null }" @kelas-dipilih="k = $event.detail" class="space-y-4">
+        <div>
+          <label class="label">Kelas (dari jadwal)</label>
+          <KelasPicker name="jadwal_id" mode="jadwal" placeholder="Pilih kelas praktikum…" />
+        </div>
+        <div class="grid sm:grid-cols-3 gap-3 p-3 rounded-2xl bg-gray-50 dark:bg-gray-900/40 text-sm" x-show="k">
+          <div><p class="label !mb-0.5">Mata kuliah</p><p class="font-semibold" x-text="k?.label.split(' — ')[0]"></p></div>
+          <div><p class="label !mb-0.5">Dosen pengampu</p><p class="font-semibold" x-text="k?.sub.split(' · ').slice(-1)[0]"></p></div>
+          <div><p class="label !mb-0.5">Kelas</p><p class="font-semibold" x-text="k?.label.split(' — ')[1]"></p></div>
+        </div>
+        <div><label class="label">Judul Materi</label><input name="judul" class="input" required placeholder="Pertemuan 1 - Pengenalan PHP" /></div>
+      </div>
+      <div><label class="label">File Materi ({settings.materiExt.join(', ')} · maks. {settings.materiMaxMb} MB)</label>
+        <input type="file" name="file" required accept={settings.materiExt.map((e) => '.' + e).join(',')} class="block w-full text-sm file:mr-3 file:px-4 file:py-2.5 file:rounded-xl file:border-0 file:bg-emerald-50 file:text-emerald-700 dark:file:bg-emerald-900/30 dark:file:text-emerald-300 file:font-semibold cursor-pointer" /></div>
+      <button class="btn btn-success"><Icon name="upload" /> Upload Materi</button>
+    </form>
+    <div class="card p-6 text-sm text-gray-600 dark:text-gray-300 space-y-3">
+      <h2 class="font-extrabold text-gray-900 dark:text-white">Panduan</h2>
+      <p>1. Pilih <b>Mata Kuliah</b>, <b>Dosen</b>, dan <b>Kelas</b>.</p>
+      <p>2. Tulis <b>judul</b> yang informatif.</p>
+      <p>3. Pilih file lalu klik <b>Upload Materi</b>.</p>
+      <p class="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-xs">Gunakan ikon <b>gembok</b> untuk menyembunyikan materi dari praktikan (misalnya soal ujian yang belum boleh dibuka).</p>
+    </div>
+  </div>
+
+  <div class="card overflow-hidden" x-data="{ buka: {}, edit: null }">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+      <h2 class="font-extrabold">Daftar Materi Terupload</h2><span class="badge bg-gray-100 dark:bg-gray-700">{total} berkas</span>
+    </div>
+    {grup.length === 0 && <p class="p-10 text-center text-gray-500">Belum ada materi.</p>}
+    <div class="divide-y divide-gray-100 dark:divide-gray-700/60">
+      {grup.map((g) => (
+        <div>
+          <div class="flex flex-wrap items-center gap-3 px-5 py-3.5 hover:bg-gray-50/70 dark:hover:bg-gray-700/20 cursor-pointer" @click={`buka[${g.id}] = !buka[${g.id}]`}>
+            <div class="flex-1 min-w-[200px]">
+              <p class="font-bold">{g.nama_matkul} <span class="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 ml-1">{g.jurusan}</span> {g.kelas && <span class="badge bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">Kelas {g.kelas}</span>}</p>
+              <p class="text-xs text-gray-500">{g.nama_dosen} · {g.materi.length} berkas</p>
+            </div>
+            <form method="post" @click.stop>
+              <input type="hidden" name="aksi" value="kunci" /><input type="hidden" name="grup_id" value={g.id} />
+              <button class:list={['btn btn-sm', g.is_locked ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300']} title={g.is_locked ? 'Buka akses' : 'Kunci akses'}>
+                <Icon name={g.is_locked ? 'lock' : 'unlock'} class="w-3.5 h-3.5" />{g.is_locked ? 'Dikunci' : 'Terbuka'}</button>
+            </form>
+            <span class="text-gray-400 transition" :class={`buka[${g.id}] && 'rotate-180'`}><Icon name="chevron" /></span>
+          </div>
+          <div x-show={`buka[${g.id}]`} class="px-5 pb-4">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-gray-100 dark:border-gray-700"><th class="th">Judul</th><th class="th">File</th><th class="th">Diupload</th><th class="th text-right">Aksi</th></tr></thead>
+              <tbody class="divide-y divide-gray-50 dark:divide-gray-700/40">
+                {g.materi.map((m) => (
+                  <tr>
+                    <td class="td font-semibold">{m.judul_materi}</td>
+                    <td class="td"><a href={`/materi/file/${m.id}`} class="text-emerald-600 hover:underline text-xs font-semibold inline-flex items-center gap-1"><Icon name="download" class="w-3.5 h-3.5" />{m.nama_asli || m.nama_file}</a>{m.ukuran > 0 && <span class="text-[11px] text-gray-400 ml-1">({fmtUkuran(m.ukuran)})</span>}</td>
+                    <td class="td text-xs text-gray-500 whitespace-nowrap">{fmtWaktu(m.created_at)}</td>
+                    <td class="td text-right whitespace-nowrap">
+                      <button type="button" class="btn btn-sm btn-ghost" @click={`edit = ${JSON.stringify({ id: m.id, judul: m.judul_materi, grup: g.id, jadwal: g.jadwal_id ? String(g.jadwal_id) : '' })}`}><Icon name="pencil" class="w-3.5 h-3.5" /></button>
+                      <form method="post" class="inline" onsubmit="return confirm('Yakin ingin menghapus materi ini?')">
+                        <input type="hidden" name="aksi" value="hapus" /><input type="hidden" name="materi_id" value={m.id} />
+                        <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <!-- Modal edit -->
+    <div x-show="edit" x-transition.opacity class="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" @click.self="edit = null" @keydown.escape.window="edit = null">
+      <template x-if="edit">
+        <form method="post" enctype="multipart/form-data" class="card w-full max-w-lg p-6 space-y-4">
+          <div class="flex items-center justify-between"><h3 class="font-extrabold">Edit Materi</h3><button type="button" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer" @click="edit = null"><Icon name="x" /></button></div>
+          <input type="hidden" name="aksi" value="edit" /><input type="hidden" name="materi_id" :value="edit.id" />
+          <input type="hidden" name="grup_lama" :value="edit.grup" />
+          <div><label class="label">Kelas (dari jadwal)</label><select name="jadwal_id" class="input" x-model="edit.jadwal">
+            <option value="">— Tetap di grup lama —</option>
+            {jadwalAktif.map((j) => <option value={String(j.id)}>{HARI[j.hari]} {j.jam_mulai} · {labelKelas(j)}</option>)}</select></div>
+          <div><label class="label">Judul</label><input name="judul" class="input" x-model="edit.judul" required /></div>
+          <div><label class="label">Ganti file (opsional)</label><input type="file" name="file" class="block w-full text-sm" /></div>
+          <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" @click="edit = null">Batal</button><button class="btn btn-primary">Simpan</button></div>
+        </form>
+      </template>
+    </div>
+  </div>
+</AdminLayout>

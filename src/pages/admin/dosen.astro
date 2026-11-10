@@ -1,0 +1,67 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { all, run } from '../../lib/db';
+import { JURUSAN } from '../../lib/jurusan';
+import { flashUrl, str, int } from '../../lib/util';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const aksi = str(f.get('aksi'));
+  const nama = str(f.get('nama_dosen')).slice(0, 120);
+  const jurusan = str(f.get('jurusan'));
+  if (aksi === 'tambah' || aksi === 'edit') {
+    if (!nama || !jurusan) return Astro.redirect(flashUrl('/admin/dosen', 'err', 'Nama dosen dan jurusan wajib diisi.'));
+    if (aksi === 'tambah') run('INSERT INTO dosen(nama_dosen, jurusan) VALUES (?,?)', nama, jurusan);
+    else run('UPDATE dosen SET nama_dosen = ?, jurusan = ? WHERE id = ?', nama, jurusan, int(f.get('id')));
+    return Astro.redirect(flashUrl('/admin/dosen', 'ok', aksi === 'tambah' ? 'Dosen berhasil ditambahkan.' : 'Data dosen diperbarui.'));
+  }
+  if (aksi === 'hapus') {
+    run('DELETE FROM dosen WHERE id = ?', int(f.get('id')));
+    return Astro.redirect(flashUrl('/admin/dosen', 'ok', 'Data dosen dihapus.'));
+  }
+}
+const list = all<{ id: number; nama_dosen: string; jurusan: string }>('SELECT * FROM dosen ORDER BY nama_dosen');
+const namaJur = (k: string) => JURUSAN.find((j) => j.kode === k)?.nama ?? k;
+---
+<AdminLayout title="Kelola Dosen" active="dosen" alpine>
+  <div class="mb-6"><h1 class="text-2xl font-extrabold tracking-tight">Kelola Dosen</h1><p class="text-sm text-gray-500">Data dosen pengampu — dipakai di Upload Materi.</p></div>
+  <div class="grid lg:grid-cols-3 gap-6" x-data="{ edit: null }">
+    <form method="post" class="card p-6 space-y-4 h-fit">
+      <input type="hidden" name="aksi" value="tambah" />
+      <h2 class="font-extrabold flex items-center gap-2"><Icon name="plus" /> Tambah Dosen</h2>
+      <div><label class="label">Nama Dosen</label><input name="nama_dosen" class="input" required placeholder="Dr. Nama Dosen, S.Kom., M.Kom." /></div>
+      <div><label class="label">Jurusan</label><select name="jurusan" class="input" required><option value="">Pilih Jurusan</option>{JURUSAN.map((j) => <option value={j.kode}>{j.nama}</option>)}</select></div>
+      <button class="btn btn-primary w-full">Simpan</button>
+    </form>
+    <div class="lg:col-span-2 card overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center"><h2 class="font-extrabold">Daftar Dosen</h2><span class="badge bg-gray-100 dark:bg-gray-700">{list.length}</span></div>
+      <table class="w-full">
+        <thead class="bg-gray-50 dark:bg-gray-900/50"><tr><th class="th w-12">No</th><th class="th">Nama</th><th class="th">Jurusan</th><th class="th text-right">Aksi</th></tr></thead>
+        <tbody class="divide-y divide-gray-100 dark:divide-gray-700/60">
+          {list.length === 0 && <tr><td colspan="4" class="p-8 text-center text-gray-500 text-sm">Belum ada data dosen.</td></tr>}
+          {list.map((d, i) => (
+            <tr>
+              <td class="td text-gray-400">{i + 1}</td>
+              <td class="td">
+                <span x-show={`edit !== ${d.id}`} class="font-semibold">{d.nama_dosen}</span>
+                <form method="post" x-show={`edit === ${d.id}`} class="flex flex-wrap gap-2" id={`f${d.id}`}>
+                  <input type="hidden" name="aksi" value="edit" /><input type="hidden" name="id" value={d.id} />
+                  <input name="nama_dosen" value={d.nama_dosen} class="input !py-1.5 flex-1 min-w-[180px]" required />
+                  <select name="jurusan" class="input !py-1.5 !w-auto">{JURUSAN.map((j) => <option value={j.kode} selected={j.kode === d.jurusan}>{j.kode}</option>)}</select>
+                  <button class="btn btn-sm btn-primary">Simpan</button>
+                </form>
+              </td>
+              <td class="td"><span class="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{namaJur(d.jurusan)}</span></td>
+              <td class="td text-right whitespace-nowrap">
+                <button type="button" class="btn btn-sm btn-ghost" @click={`edit = edit === ${d.id} ? null : ${d.id}`}><Icon name="pencil" class="w-3.5 h-3.5" /></button>
+                <form method="post" class="inline" onsubmit="return confirm('Hapus data dosen ini?')"><input type="hidden" name="aksi" value="hapus" /><input type="hidden" name="id" value={d.id} />
+                  <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</AdminLayout>

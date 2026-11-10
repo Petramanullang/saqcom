@@ -1,0 +1,363 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import Icon from '../../../components/Icon.astro';
+import KelasPicker from '../../../components/KelasPicker.astro';
+import { listJadwal } from '../../../lib/jadwal';
+import { all } from '../../../lib/db';
+import {
+  bacaFilter, filterKeQuery, cariSubmission, kelompokkan, listKelas, listSesi, rosterKelas,
+  setArsip, hapusSubmission, PER_HALAMAN, type Grup,
+} from '../../../lib/tugas';
+import { fmtWaktu, fmtUkuran, hexToRgb, todayWib, flashUrl, str } from '../../../lib/util';
+
+// ---------------- Aksi massal (POST) ----------------
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const kembali = '/admin/tugas' + (str(form.get('kembali')).startsWith('?') ? str(form.get('kembali')) : '');
+  const ids = str(form.get('ids')).split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  const aksi = str(form.get('aksi'));
+  if (!ids.length) return Astro.redirect(flashUrl(kembali, 'err', 'Pilih minimal satu pengumpulan terlebih dahulu.'));
+  if (aksi === 'arsip') return Astro.redirect(flashUrl(kembali, 'ok', `${setArsip(ids, true)} pengumpulan diarsipkan.`));
+  if (aksi === 'kembalikan') return Astro.redirect(flashUrl(kembali, 'ok', `${setArsip(ids, false)} pengumpulan dikembalikan dari arsip.`));
+  if (aksi === 'hapus') {
+    if (str(form.get('konfirmasi')).toUpperCase() !== 'HAPUS') return Astro.redirect(flashUrl(kembali, 'err', 'Ketik HAPUS untuk konfirmasi penghapusan permanen.'));
+    return Astro.redirect(flashUrl(kembali, 'ok', `${hapusSubmission(ids)} pengumpulan beserta file-nya dihapus permanen.`));
+  }
+  return Astro.redirect(kembali);
+}
+
+// ---------------- Data ----------------
+const f = bacaFilter(Astro.url);
+const qs = filterKeQuery(f);
+const kelasList = listKelas();
+const kelasMap = new Map(kelasList.map((k) => [k.id, k]));
+const jadwalMap = new Map(listJadwal().map((j) => [j.id, j]));
+const kelasAktif = f.kelasId ? kelasMap.get(f.kelasId) : undefined;
+const semuaSesi = listSesi();
+const sesiMap = new Map(semuaSesi.map((s) => [s.id, s]));
+const sesiPilihan = f.kelasId ? semuaSesi.filter((s) => s.kelas_id === f.kelasId) : semuaSesi;
+
+const subs = cariSubmission(f);
+const { grup, indikasi } = kelompokkan(subs);
+
+// Mahasiswa yang belum mengumpulkan (butuh kelas + daftar mahasiswa)
+const roster = f.kelasId ? rosterKelas(f.kelasId) : [];
+const sudah = new Set(grup.map((g) => g.utama.nim));
+const belum = roster.filter((m) => !sudah.has(m.nim));
+const rosterNama = new Map(roster.map((m) => [m.nim, m.nama]));
+const filterKonteksJelas = typeof f.sesi === 'number' || (!!f.dari && f.dari === f.sampai);
+
+const stat = {
+  grup: grup.length,
+  mhs: sudah.size,
+  terlambat: grup.filter((g) => g.flags.includes('terlambat')).length,
+  ganda: grup.filter((g) => g.flags.includes('ganda')).length,
+  indikasi: indikasi.length,
+};
+
+const flagInfo: Record<string, { label: string; cls: string }> = {
+  terlambat: { label: 'Terlambat', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
+  ganda: { label: 'Upload ganda', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
+  'pc-sama': { label: 'PC sama', cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
+  'file-sama': { label: 'File identik', cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
+};
+
+const labelSesi = (id: number | null, tanggal: string) => (id ? sesiMap.get(id)?.judul ?? `Sesi #${id}` : `Umum · ${fmtWaktu(tanggal).split(',')[0]}`);
+const idsGrup = (g: Grup) => [g.utama.id, ...g.lama.map((x) => x.id)].join(',');
+const tanpaOtomatis = { ...f, otomatisHariIni: false, semuaTanggal: false };
+// Paginasi: 20 pengumpulan per halaman
+const totalHal = Math.max(1, Math.ceil(grup.length / PER_HALAMAN));
+const hal = Math.min(f.hal, totalHal);
+const grupHal = grup.slice((hal - 1) * PER_HALAMAN, hal * PER_HALAMAN);
+const hrefHal = (n: number) => '/admin/tugas' + filterKeQuery(f, n);
+const kelasLama = kelasList.filter((k) => !k.aktif).map((k) => ({ value: String(k.id), label: k.nama.replace(/_/g, ' '), sub: 'Nonaktif / semester lama', grup: 'Nonaktif / semester lama', cari: k.nama.toLowerCase() }));
+const labelKelasTugas = (id: number) => { const k = kelasMap.get(id); if (!k) return ''; const j = k.jadwal_id ? jadwalMap.get(k.jadwal_id) : undefined; return j ? `${j.nama_matkul} (${j.jurusan}) — ${j.kelas}` : k.nama.replace(/_/g, ' '); };
+const today = todayWib();
+const minggu = (() => { const d = new Date(Date.now() - 6 * 864e5); return new Date(d.getTime() + 7 * 36e5).toISOString().slice(0, 10); })();
+
+// Data untuk export Excel (diproses di browser dengan SheetJS)
+const excel = {
+  nama: `Rekap_Tugas_${kelasAktif?.nama ?? 'Semua'}_${today}`,
+  pengumpulan: grup.map((g, i) => ({
+    No: i + 1, NIM: g.utama.nim, Nama: g.utama.nama, Kelas: labelKelasTugas(g.utama.kelas_id),
+    Tugas: labelSesi(g.utama.sesi_id, g.utama.created_at), 'Waktu Upload': g.utama.created_at,
+    Status: g.utama.terlambat ? 'TERLAMBAT' : 'Tepat waktu', 'Jumlah Upload': g.lama.length + 1,
+    'Jumlah File': g.utama.files.length, File: g.utama.files.map((x) => x.nama_asli).join(', '),
+    PC: g.utama.hostname, IP: g.utama.ip, 'Kode Bukti': g.utama.kode,
+    Indikasi: g.flags.filter((x) => x === 'pc-sama' || x === 'file-sama').map((x) => flagInfo[x].label).join(', '),
+  })),
+  belum: belum.map((m, i) => ({ No: i + 1, NIM: m.nim, Nama: m.nama, Kelas: f.kelasId ? labelKelasTugas(f.kelasId) : '' })),
+  indikasi: indikasi.flatMap((x) => x.nims.map((n) => ({ Jenis: x.judul, Detail: x.detail, NIM: n.nim, Nama: n.nama }))),
+};
+---
+<AdminLayout title="Tugas Masuk" active="tugas" alpine width="full" scripts={['/vendor/xlsx.full.min.js']}>
+  <script is:inline type="application/json" id="excel-data" set:html={JSON.stringify(excel).replace(/</g, '\\u003c')}></script>
+  <div class="max-w-[1500px] mx-auto" x-data="tugasPage" x-cloak>
+    <!-- Judul -->
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-5">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/20"><Icon name="inbox" class="w-5 h-5" /></div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Tugas Masuk {f.arsip && <span class="text-amber-500">· Arsip</span>}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Periksa, pratinjau, dan unduh tugas praktikum mahasiswa</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="/admin/tugas/kelas" class="btn btn-ghost"><Icon name="calendar" /> Tugas, Deadline &amp; Mahasiswa</a>
+        <button type="button" class="btn btn-success" @click="exportExcel()"><Icon name="table" /> Export Excel</button>
+        <a href={`/admin/tugas/zip${qs}`} class:list={['btn btn-dark', !grup.length && 'pointer-events-none opacity-50']}><Icon name="zip" /> ZIP hasil filter</a>
+      </div>
+    </div>
+
+    <!-- Filter -->
+    <form method="get" class="card p-4 mb-5 grid gap-3 md:grid-cols-12 items-end" x-ref="filter">
+      <div class="md:col-span-12 lg:col-span-4" @kelas-dipilih={`if (($event.detail?.value ?? '') !== '${f.kelasId ?? ''}') { $nextTick(() => { $refs.filter.querySelector('[name=sesi]').value = 'all'; $refs.filter.submit(); }) }`}>
+        <label class="label">Kelas</label>
+        <KelasPicker name="kelas" mode="kelasTugas" manual kosong="Semua kelas" value={f.kelasId ?? ''} tanpaDefault tambahan={kelasLama} />
+      </div>
+      <div class="md:col-span-4 lg:col-span-2">
+        <label class="label">Tugas / Pertemuan</label>
+        <select name="sesi" class="input" onchange="this.form.submit()">
+          <option value="all" selected={f.sesi === 'all'}>Semua tugas</option>
+          <option value="umum" selected={f.sesi === 'umum'}>Umum (tanpa sesi)</option>
+          {sesiPilihan.map((s) => (
+            <option value={s.id} selected={f.sesi === s.id}>{f.kelasId ? '' : `${labelKelasTugas(s.kelas_id)} — `}{s.judul}{s.dibuka ? '' : ' (ditutup)'}</option>
+          ))}
+        </select>
+      </div>
+      <div class="md:col-span-4 lg:col-span-2"><label class="label">Dari tanggal</label><input type="date" name="dari" value={f.semuaTanggal ? '' : f.dari} class="input" /></div>
+      <div class="md:col-span-4 lg:col-span-2"><label class="label">Sampai</label><input type="date" name="sampai" value={f.semuaTanggal ? '' : f.sampai} class="input" /></div>
+      <div class="md:col-span-8 lg:col-span-2">
+        <label class="label">Cari</label>
+        <div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icon name="search" /></span>
+          <input type="search" name="q" value={f.q} placeholder="NIM, nama, kode bukti, PC…" class="input !pl-9" /></div>
+      </div>
+      <div class="md:col-span-4 lg:col-span-12 xl:col-span-12 flex gap-2 lg:justify-end">
+        <button class="btn btn-primary flex-1 lg:flex-none">Terapkan</button>
+        <a href={'/admin/tugas' + (f.kelasId ? `?kelas=${f.kelasId}` : '')} class="btn btn-ghost" title="Reset filter"><Icon name="refresh" /></a>
+      </div>
+      <div class="md:col-span-12 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-gray-400 font-semibold">Cepat:</span>
+        <a class="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 font-semibold hover:bg-gray-200" href={'/admin/tugas' + filterKeQuery({ ...tanpaOtomatis, dari: today, sampai: today })} class:list={[f.dari === today && f.sampai === today && !f.semuaTanggal && '!bg-blue-600 !text-white']}>Hari ini</a>
+        <a class="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 font-semibold hover:bg-gray-200" href={'/admin/tugas' + filterKeQuery({ ...tanpaOtomatis, dari: minggu, sampai: today })}>7 hari terakhir</a>
+        <a class="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 font-semibold hover:bg-gray-200" href={'/admin/tugas' + filterKeQuery({ ...f, dari: '', sampai: '', semuaTanggal: true })} class:list={[f.semuaTanggal && '!bg-blue-600 !text-white']}>Semua tanggal</a>
+        <span class="mx-1 text-gray-300">|</span>
+        <a class:list={['px-2.5 py-1 rounded-lg font-semibold inline-flex items-center gap-1', f.arsip ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300']} href={'/admin/tugas' + filterKeQuery({ ...f, arsip: !f.arsip, hal: 1 })}>
+          <Icon name="archive" class="w-3.5 h-3.5" />{f.arsip ? 'Kembali ke tugas aktif' : 'Lihat arsip'}
+        </a>
+      </div>
+    </form>
+
+    <!-- Statistik -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <div class="card p-4"><p class="label !mb-1">Pengumpulan</p><p class="text-2xl font-black">{stat.grup}</p></div>
+      <div class="card p-4"><p class="label !mb-1">Mahasiswa</p><p class="text-2xl font-black">{stat.mhs}{roster.length > 0 && <span class="text-sm text-gray-400 font-bold"> / {roster.length}</span>}</p></div>
+      <div class="card p-4"><p class="label !mb-1">Belum kumpul</p><p class:list={['text-2xl font-black', belum.length && 'text-red-600 dark:text-red-400']}>{f.kelasId ? (roster.length ? belum.length : '—') : '—'}</p></div>
+      <div class="card p-4"><p class="label !mb-1">Terlambat</p><p class:list={['text-2xl font-black', stat.terlambat && 'text-amber-600']}>{stat.terlambat}</p></div>
+      <div class="card p-4"><p class="label !mb-1">Upload ganda</p><p class="text-2xl font-black">{stat.ganda}</p></div>
+      <div class="card p-4"><p class="label !mb-1">Indikasi</p><p class:list={['text-2xl font-black', stat.indikasi && 'text-red-600 dark:text-red-400']}>{stat.indikasi}</p></div>
+    </div>
+
+    <!-- Panel: belum mengumpulkan & indikasi -->
+    <div class="grid lg:grid-cols-2 gap-4 mb-5 items-start">
+      <details class="card p-0 group" open={belum.length > 0 && belum.length <= 15}>
+        <summary class="list-none cursor-pointer p-4 flex items-center justify-between gap-3">
+          <span class="font-bold flex items-center gap-2"><Icon name="users" class="w-4 h-4 text-red-500" /> Belum mengumpulkan
+            {f.kelasId && roster.length > 0 && <span class="badge bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">{belum.length}</span>}</span>
+          <Icon name="chevron" class="w-4 h-4 text-gray-400 group-open:rotate-180 transition" />
+        </summary>
+        <div class="px-4 pb-4 text-sm">
+          {!f.kelasId && <p class="text-gray-500">Pilih satu kelas di tab atas untuk melihat siapa yang belum mengumpulkan.</p>}
+          {f.kelasId && roster.length === 0 && (
+            <p class="text-gray-500">Daftar mahasiswa kelas ini belum diisi. <a class="text-blue-600 font-semibold" href={`/admin/tugas/kelas?kelas=${f.kelasId}#mahasiswa`}>Isi dari data Kontrak atau import Excel →</a></p>
+          )}
+          {f.kelasId && roster.length > 0 && !filterKonteksJelas && (
+            <p class="mb-3 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-xs">Tips: pilih <b>tugas/pertemuan</b> atau <b>satu tanggal</b> agar daftar ini akurat untuk satu kali pengumpulan.</p>
+          )}
+          {f.kelasId && roster.length > 0 && belum.length === 0 && <p class="text-emerald-600 font-semibold">Semua mahasiswa sudah mengumpulkan 🎉</p>}
+          {belum.length > 0 && (
+            <ul class="grid sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto">
+              {belum.map((m) => <li class="flex gap-2 px-2.5 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-900/40"><span class="font-mono text-xs text-gray-500 pt-0.5">{m.nim}</span><span class="truncate font-medium">{m.nama || '-'}</span></li>)}
+            </ul>
+          )}
+        </div>
+      </details>
+
+      <details class="card p-0 group" open={indikasi.length > 0 && indikasi.length <= 6}>
+        <summary class="list-none cursor-pointer p-4 flex items-center justify-between gap-3">
+          <span class="font-bold flex items-center gap-2"><Icon name="flag" class="w-4 h-4 text-red-500" /> Indikasi kecurangan
+            {indikasi.length > 0 && <span class="badge bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">{indikasi.length}</span>}</span>
+          <Icon name="chevron" class="w-4 h-4 text-gray-400 group-open:rotate-180 transition" />
+        </summary>
+        <div class="px-4 pb-4 text-sm space-y-2 max-h-80 overflow-y-auto">
+          {indikasi.length === 0 && <p class="text-gray-500">Tidak ada indikasi pada hasil filter ini. Sistem memeriksa <b>satu PC yang dipakai beberapa NIM</b> dan <b>file identik</b> antar mahasiswa.</p>}
+          {indikasi.map((x) => (
+            <div class="p-3 rounded-xl border border-red-100 dark:border-red-900/40 bg-red-50/50 dark:bg-red-900/10">
+              <p class="font-bold text-red-700 dark:text-red-300 text-xs uppercase tracking-wide">{x.judul}</p>
+              <p class="text-xs text-gray-600 dark:text-gray-400 mb-1.5 break-all">{x.tipe === 'pc' ? 'PC: ' : 'File: '}{x.detail}</p>
+              <div class="flex flex-wrap gap-1.5">{x.nims.map((n) => <a href={'/admin/tugas' + filterKeQuery({ ...f, q: n.nim })} class="badge bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{n.nim} · {n.nama}</a>)}</div>
+            </div>
+          ))}
+          <p class="text-[11px] text-gray-400">Indikasi bukan bukti — periksa langsung sebelum mengambil keputusan.</p>
+        </div>
+      </details>
+    </div>
+
+    <!-- Aksi massal -->
+    <form method="post" x-ref="bulk" class="sticky top-[5.5rem] z-30 mb-3" x-show="dipilih.length" x-transition>
+      <input type="hidden" name="kembali" value={qs} />
+      <input type="hidden" name="ids" :value="idsDipilih" />
+      <input type="hidden" name="aksi" x-ref="aksi" />
+      <input type="hidden" name="konfirmasi" x-ref="konfirmasi" />
+      <div class="flex flex-wrap items-center gap-2 p-3 rounded-2xl bg-gray-900 text-white shadow-xl">
+        <span class="text-sm font-bold px-2"><span x-text="dipilih.length"></span> dipilih</span>
+        <a :href="'/admin/tugas/zip?ids=' + idsDipilih" class="btn btn-sm bg-white/10 hover:bg-white/20"><Icon name="zip" class="w-3.5 h-3.5" /> ZIP</a>
+        {!f.arsip && <button type="button" class="btn btn-sm bg-amber-500 hover:bg-amber-600" @click="kirim('arsip')"><Icon name="archive" class="w-3.5 h-3.5" /> Arsipkan</button>}
+        {f.arsip && <button type="button" class="btn btn-sm bg-emerald-600 hover:bg-emerald-700" @click="kirim('kembalikan')"><Icon name="refresh" class="w-3.5 h-3.5" /> Kembalikan</button>}
+        <button type="button" class="btn btn-sm bg-red-600 hover:bg-red-700" @click="hapus()"><Icon name="trash" class="w-3.5 h-3.5" /> Hapus permanen</button>
+        <button type="button" class="btn btn-sm ml-auto bg-white/10 hover:bg-white/20" @click="dipilih = []">Batal</button>
+      </div>
+    </form>
+
+    <!-- Tabel -->
+    <div class="card overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[960px]">
+          <thead class="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+            <tr>
+              <th class="th w-10"><input type="checkbox" class="w-4 h-4 accent-blue-600" @change="pilihSemua($event.target.checked)" :checked="dipilih.length && dipilih.length === semua.length" /></th>
+              <th class="th">Mahasiswa</th>
+              <th class="th">Kelas &amp; Tugas</th>
+              <th class="th">Waktu</th>
+              <th class="th">PC</th>
+              <th class="th">File</th>
+              <th class="th text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 dark:divide-gray-700/60">
+            {grup.length === 0 && (
+              <tr><td colspan="7" class="px-4 py-16 text-center text-gray-500">
+                <Icon name="inbox" class="w-10 h-10 mx-auto mb-3 text-gray-300" stroke={1.5} />
+                <p class="font-semibold">Belum ada tugas yang cocok dengan filter ini.</p>
+              </td></tr>
+            )}
+            {grupHal.map((g) => {
+              const s = g.utama;
+              const k = kelasMap.get(s.kelas_id);
+              const total = s.files.reduce((a, x) => a + x.ukuran, 0);
+              const namaRoster = rosterNama.get(s.nim);
+              return (
+                <>
+                  <tr class="hover:bg-gray-50/70 dark:hover:bg-gray-700/20" :class={`dipilih.includes('${idsGrup(g)}') && 'bg-blue-50/60 dark:bg-blue-900/10'`}>
+                    <td class="td"><input type="checkbox" class="w-4 h-4 accent-blue-600" value={idsGrup(g)} x-model="dipilih" /></td>
+                    <td class="td">
+                      <p class="font-bold leading-tight">{s.nama}</p>
+                      <p class="font-mono text-xs text-gray-500">{s.nim}</p>
+                      {namaRoster === undefined && roster.length > 0 && <p class="text-[11px] text-amber-600">NIM tidak ada di daftar kelas</p>}
+                      <div class="flex flex-wrap gap-1 mt-1.5">{g.flags.map((fl) => <span class:list={['badge', flagInfo[fl].cls]}>{fl === 'ganda' ? `${g.lama.length + 1}× upload` : flagInfo[fl].label}</span>)}{s.impor ? <span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Data lama</span> : null}</div>
+                    </td>
+                    <td class="td">
+                      <span class="inline-flex items-center gap-1.5 text-xs font-bold" style={`color:${k?.warna}`}><span class="w-2 h-2 rounded-full" style={`background:${k?.warna}`}></span>{labelKelasTugas(s.kelas_id)}</span>
+                      <p class="text-sm text-gray-700 dark:text-gray-300 mt-0.5">{labelSesi(s.sesi_id, s.created_at)}</p>
+                    </td>
+                    <td class="td whitespace-nowrap">
+                      <p class="font-semibold">{fmtWaktu(s.created_at)}</p>
+                      <p class="text-[11px] text-gray-400 font-mono">#{s.kode}</p>
+                    </td>
+                    <td class="td"><p class="font-semibold text-xs">{s.hostname || '-'}</p><p class="text-[11px] text-gray-400 font-mono">{s.ip}</p></td>
+                    <td class="td">
+                      <div class="flex flex-wrap gap-1.5 max-w-md">
+                        {s.files.map((x) => (
+                          <button type="button" @click={`preview(${x.id}, ${JSON.stringify(x.nama_asli)})`} title={`${x.nama_asli} (${fmtUkuran(x.ukuran)})`}
+                            class="inline-flex items-center gap-1.5 max-w-[220px] px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-blue-400 hover:text-blue-600 text-xs font-medium cursor-pointer">
+                            <Icon name="eye" class="w-3.5 h-3.5 shrink-0" /><span class="truncate">{x.nama_asli}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <p class="text-[11px] text-gray-400 mt-1">{s.files.length} file · {fmtUkuran(total)}</p>
+                    </td>
+                    <td class="td text-right whitespace-nowrap">
+                      <a href={`/admin/tugas/zip?ids=${s.id}`} class="btn btn-sm btn-ghost" title="Download ZIP"><Icon name="zip" class="w-3.5 h-3.5" /> ZIP</a>
+                      {g.lama.length > 0 && <button type="button" class="btn btn-sm btn-ghost" @click={`buka['${g.key}'] = !buka['${g.key}']`}><Icon name="clock" class="w-3.5 h-3.5" /> {g.lama.length} lama</button>}
+                    </td>
+                  </tr>
+                  {g.lama.map((o, i) => (
+                    <tr x-show={`buka['${g.key}']`} class="bg-gray-50/80 dark:bg-gray-900/30 text-gray-600 dark:text-gray-400">
+                      <td class="td"></td>
+                      <td class="td text-xs" colspan="2"><span class="badge bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Versi {g.lama.length - i}</span> {o.terlambat ? <span class="badge bg-amber-100 text-amber-700">Terlambat</span> : null}</td>
+                      <td class="td text-xs whitespace-nowrap">{fmtWaktu(o.created_at)}<br /><span class="font-mono text-[11px]">#{o.kode}</span></td>
+                      <td class="td text-xs">{o.hostname}<br /><span class="font-mono text-[11px]">{o.ip}</span></td>
+                      <td class="td"><div class="flex flex-wrap gap-1.5">{o.files.map((x) => (
+                        <button type="button" @click={`preview(${x.id}, ${JSON.stringify(x.nama_asli)})`} class="inline-flex items-center gap-1 max-w-[200px] px-2 py-1 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-xs cursor-pointer hover:text-blue-600"><span class="truncate">{x.nama_asli}</span></button>
+                      ))}</div></td>
+                      <td class="td text-right"><a href={`/admin/tugas/zip?ids=${o.id}`} class="btn btn-sm btn-ghost"><Icon name="zip" class="w-3.5 h-3.5" /></a></td>
+                    </tr>
+                  ))}
+                </>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 dark:border-gray-700 text-sm">
+        <span class="text-gray-500">{grup.length ? `Menampilkan ${(hal - 1) * PER_HALAMAN + 1}–${Math.min(hal * PER_HALAMAN, grup.length)} dari ${grup.length} pengumpulan` : 'Tidak ada data'}{f.otomatisHariIni ? ' · hari ini' : ''}</span>
+        {totalHal > 1 && (
+          <div class="flex items-center gap-1">
+            <a href={hrefHal(hal - 1)} class:list={['btn btn-sm btn-ghost', hal <= 1 && 'pointer-events-none opacity-40']}><Icon name="chevronLeft" class="w-3.5 h-3.5" /></a>
+            {Array.from({ length: totalHal }, (_, i) => i + 1).filter((n) => n === 1 || n === totalHal || Math.abs(n - hal) <= 2).map((n, i, arr) => (
+              <>
+                {i > 0 && n - arr[i - 1] > 1 && <span class="px-1 text-gray-400">…</span>}
+                <a href={hrefHal(n)} class:list={['btn btn-sm min-w-8', n === hal ? 'btn-primary' : 'btn-ghost']}>{n}</a>
+              </>
+            ))}
+            <a href={hrefHal(hal + 1)} class:list={['btn btn-sm btn-ghost', hal >= totalHal && 'pointer-events-none opacity-40']}><Icon name="chevronRight" class="w-3.5 h-3.5" /></a>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <!-- Modal preview -->
+    <div x-show="pv.open" x-transition.opacity class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6" @keydown.escape.window="pv.open = false" @click.self="pv.open = false">
+      <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden">
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+          <p class="font-bold text-sm truncate flex-1" x-text="pv.nama"></p>
+          <a :href="'/admin/tugas/lihat/' + pv.id" target="_blank" class="btn btn-sm btn-ghost">Tab baru</a>
+          <a :href="'/admin/tugas/file/' + pv.id" class="btn btn-sm btn-primary"><Icon name="download" class="w-3.5 h-3.5" /> Download</a>
+          <button type="button" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer" @click="pv.open = false" aria-label="Tutup"><Icon name="x" /></button>
+        </div>
+        <iframe :src="pv.open ? '/admin/tugas/lihat/' + pv.id + '?embed=1' : 'about:blank'" class="flex-1 w-full border-0 bg-white dark:bg-gray-900" title="Pratinjau"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script is:inline>
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('tugasPage', () => ({
+        dipilih: [], buka: {}, pv: { open: false, id: 0, nama: '' },
+        get semua() { return Array.from(document.querySelectorAll('tbody input[type=checkbox][value]')).map((c) => c.value); },
+        get idsDipilih() { return this.dipilih.join(','); },
+        pilihSemua(v) { this.dipilih = v ? this.semua : []; },
+        preview(id, nama) { this.pv = { open: true, id, nama }; },
+        kirim(aksi) { this.$refs.aksi.value = aksi; this.$refs.bulk.submit(); },
+        hapus() {
+          const k = prompt('Hapus PERMANEN ' + this.dipilih.length + ' pengumpulan beserta semua file-nya?\nKetik HAPUS untuk melanjutkan:');
+          if (k === null) return;
+          this.$refs.konfirmasi.value = k; this.kirim('hapus');
+        },
+        exportExcel() {
+          const D = JSON.parse(document.getElementById('excel-data').textContent);
+          const wb = XLSX.utils.book_new();
+          const add = (rows, name, cols) => {
+            const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ Info: 'Tidak ada data' }]);
+            if (cols) ws['!cols'] = cols.map((w) => ({ wch: w }));
+            XLSX.utils.book_append_sheet(wb, ws, name);
+          };
+          add(D.pengumpulan, 'Pengumpulan', [5, 13, 28, 24, 26, 20, 13, 8, 8, 40, 16, 15, 11, 18]);
+          if (D.belum.length) add(D.belum, 'Belum Mengumpulkan', [5, 13, 30, 24]);
+          if (D.indikasi.length) add(D.indikasi, 'Indikasi', [28, 30, 13, 30]);
+          XLSX.writeFile(wb, D.nama.replace(/[^\w.-]+/g, '_') + '.xlsx');
+        },
+      }));
+    });
+  </script>
+</AdminLayout>

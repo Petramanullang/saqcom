@@ -1,0 +1,738 @@
+<!--ATTRS "class=\"bg-gray-50 dark:bg-gray-900 min-h-screen\" x-data=\"takeQuiz()\" x-cloak" -->
+<!--STYLE-->
+<style>
+[x-cloak] { display: none !important; }
+.answer-card { transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease, background 0.12s ease; }
+.answer-card:hover { transform: translateX(4px); }
+.answer-card.selected { background: #ede9fe; border-color: #7c3aed !important; }
+.dark .answer-card.selected { background: rgba(124,58,237,0.15); border-color: #7c3aed !important; }
+.answer-card.correct-reveal { background: #dcfce7 !important; border-color: #22c55e !important; }
+.answer-card.wrong-reveal   { background: #fee2e2 !important; border-color: #ef4444 !important; }
+.dark .answer-card.correct-reveal { background: rgba(34,197,94,0.15) !important; border-color: #22c55e !important; }
+.dark .answer-card.wrong-reveal   { background: rgba(239,68,68,0.15) !important; border-color: #ef4444 !important; }
+
+/* Timer states */
+.timer-normal  { color: #7c3aed; }
+.timer-warning { color: #f59e0b; }
+.timer-danger  { color: #ef4444; animation: timerPulse 1s ease infinite; }
+
+/* Nav dots */
+.q-dot { width: 28px; height: 28px; border-radius: 50%; font-size: 0.65rem; font-weight: 700; cursor: pointer; transition: all 0.15s ease; border: 2px solid transparent; }
+.q-dot.answered  { background: #7c3aed; color: white; }
+.q-dot.current   { border-color: #7c3aed; background: #ede9fe; color: #7c3aed; }
+.q-dot.unanswered{ background: #f1f5f9; color: #94a3b8; }
+.dark .q-dot.unanswered { background: #334155; color: #64748b; }
+
+/* Score circle animation */
+@keyframes scoreReveal { from { stroke-dashoffset: 283; } }
+
+/* Confetti */
+@keyframes confettiFall {
+0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+.confetti-piece { position: fixed; width: 10px; height: 10px; pointer-events: none; animation: confettiFall linear forwards; }
+</style>
+<!--/STYLE-->
+
+
+<!-- ===== LOADING SCREEN ===== -->
+<div x-show="phase === 'loading'" class="fixed inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-50">
+<div class="text-center">
+<svg class="animate-spin h-10 w-10 text-purple-500 mx-auto mb-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+<p class="text-sm text-gray-500 dark:text-gray-400">Memuat quiz...</p>
+</div>
+</div>
+
+<!-- ===== ERROR SCREEN ===== -->
+<div x-show="phase === 'error'" class="fixed inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-50 p-4">
+<div class="text-center max-w-sm">
+<div class="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+</div>
+<h2 class="text-lg font-bold text-gray-800 dark:text-white mb-2" x-text="errorMsg"></h2>
+<p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Hubungi dosen/pengawas untuk informasi lebih lanjut.</p>
+<a href="/quiz" class="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl hover:bg-purple-700 transition-all">
+Kembali ke Dashboard
+</a>
+</div>
+</div>
+
+<!-- ===== INTRO SCREEN ===== -->
+<div x-show="phase === 'intro'" class="min-h-screen flex items-center justify-center p-4">
+<div class="w-full max-w-lg fade-in">
+<!-- Cover card -->
+<div class="gradient-header rounded-3xl p-8 text-white text-center mb-4 shadow-xl">
+<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/20 mb-4">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+</div>
+<h1 class="text-2xl font-extrabold mb-2" x-text="quiz.title"></h1>
+<p class="text-white/80 text-sm mb-5" x-text="quiz.description || ''"></p>
+<div class="flex justify-center gap-4 text-sm flex-wrap">
+<div class="flex items-center gap-1.5 bg-white/20 rounded-xl px-3 py-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span x-text="questions.length + ' Soal'"></span>
+</div>
+<div x-show="quiz.settings?.timeLimit > 0" class="flex items-center gap-1.5 bg-white/20 rounded-xl px-3 py-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span x-text="quiz.settings?.timeLimit + ' Menit'"></span>
+</div>
+<div class="flex items-center gap-1.5 bg-white/20 rounded-xl px-3 py-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+<span x-text="totalPoints + ' Poin'"></span>
+</div>
+</div>
+</div>
+
+<!-- Identity form -->
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 space-y-4">
+<h3 class="text-sm font-bold text-gray-700 dark:text-gray-300">Identitas Peserta</h3>
+<div>
+<label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Nama Lengkap *</label>
+<input type="text" x-model="participant.name" placeholder="Masukkan nama lengkap Anda"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+<div>
+<label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">NIM</label>
+<input type="text" x-model="participant.nim" placeholder="Nomor Induk Mahasiswa (opsional)"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+
+<!-- Info boxes -->
+<div x-show="quiz.settings?.timeLimit > 0" class="flex items-start gap-2.5 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-300">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span>Quiz ini memiliki batas waktu <strong x-text="quiz.settings?.timeLimit + ' menit'"></strong>. Timer berjalan terus meskipun Anda berpindah tab atau minimize browser.</span>
+</div>
+
+<div x-show="quiz.settings?.showResults" class="flex items-start gap-2.5 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl text-xs text-green-800 dark:text-green-300">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span>Hasil dan skor akan ditampilkan otomatis setelah Anda submit.</span>
+</div>
+
+<button @click="startQuiz()" :disabled="!participant.name.trim()"
+class="btn w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-sm transition-all text-sm flex items-center justify-center gap-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+Mulai Quiz
+</button>
+</div>
+</div>
+</div>
+
+<!-- ===== QUIZ TAKING SCREEN ===== -->
+<div x-show="phase === 'taking'" class="min-h-screen flex flex-col">
+
+<!-- Sticky top bar -->
+<div class="sticky top-0 z-30 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+<div class="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
+<!-- Progress -->
+<div class="flex-1">
+<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+<span x-text="'Soal ' + (currentQ + 1) + ' dari ' + questions.length"></span>
+<span x-text="answeredCount + ' dijawab'"></span>
+</div>
+<div class="progress-track">
+<div class="progress-fill" :style="'width:' + (answeredCount / questions.length * 100) + '%'"></div>
+</div>
+</div>
+
+<!-- Timer -->
+<div x-show="quiz.settings?.timeLimit > 0" class="flex-shrink-0 flex items-center gap-2">
+<div class="relative w-12 h-12">
+<svg class="w-12 h-12" viewBox="0 0 40 40">
+<circle class="timer-ring-track" cx="20" cy="20" r="16"/>
+<circle class="timer-ring-fill timer-ring"
+cx="20" cy="20" r="16"
+:stroke="timerColor"
+:stroke-dasharray="100.53"
+:stroke-dashoffset="timerDashOffset"></circle>
+</svg>
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="text-xs font-bold" :class="timerClass" x-text="timerDisplay"></span>
+</div>
+</div>
+</div>
+
+<!-- Tab warning -->
+<div x-show="tabWarnings > 0" class="flex-shrink-0">
+<span class="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-2 py-1 rounded-lg" x-text="tabWarnings + '× pindah tab'"></span>
+</div>
+</div>
+</div>
+
+<!-- Question area -->
+<div class="flex-1 max-w-3xl mx-auto w-full px-4 py-6 pb-32">
+<template x-if="questions[currentQ]">
+<div class="fade-in" :key="currentQ">
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-4">
+<!-- Question header -->
+<div class="flex items-start gap-3 mb-5">
+<span class="flex-shrink-0 w-8 h-8 rounded-full gradient-header text-white text-xs font-bold flex items-center justify-center" x-text="currentQ + 1"></span>
+<div class="flex-1">
+<p class="text-base font-semibold text-gray-800 dark:text-white leading-relaxed" x-text="questions[currentQ].text"></p>
+<p x-show="questions[currentQ].hint" class="text-xs text-gray-400 dark:text-gray-500 mt-1 italic" x-text="'💡 ' + questions[currentQ].hint"></p>
+</div>
+<span x-show="questions[currentQ].required" class="text-red-500 font-bold text-lg flex-shrink-0">*</span>
+</div>
+
+<!-- ===== ANSWER INPUTS ===== -->
+
+<!-- Multiple choice -->
+<div x-show="questions[currentQ].type === 'multiple_choice'" class="space-y-2.5">
+<template x-for="(opt, oi) in questions[currentQ].options" :key="oi">
+<label class="answer-card flex items-center gap-3 p-3.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 cursor-pointer"
+:class="answers[questions[currentQ].id] === oi ? 'selected' : ''">
+<input type="radio" :name="'q'+currentQ" :value="oi" x-model.number="answers[questions[currentQ].id]" @change="updateAnsweredCount()" class="sr-only">
+<div class="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
+:class="answers[questions[currentQ].id] === oi ? 'border-purple-600 bg-purple-600' : 'border-gray-300 dark:border-gray-600'">
+<div x-show="answers[questions[currentQ].id] === oi" class="w-2 h-2 rounded-full bg-white"></div>
+</div>
+<span class="text-xs font-bold text-gray-400 w-4" x-text="String.fromCharCode(65+oi)"></span>
+<span class="text-sm text-gray-700 dark:text-gray-300 flex-1" x-text="opt.text || 'Pilihan ' + String.fromCharCode(65+oi)"></span>
+</label>
+</template>
+</div>
+
+<!-- Checkbox -->
+<div x-show="questions[currentQ].type === 'checkbox'" class="space-y-2.5">
+<p class="text-xs text-purple-600 dark:text-purple-400 font-semibold mb-1">Pilih semua yang benar</p>
+<template x-for="(opt, oi) in questions[currentQ].options" :key="oi">
+<label class="answer-card flex items-center gap-3 p-3.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 cursor-pointer"
+:class="isChecked(questions[currentQ].id, oi) ? 'selected' : ''">
+<input type="checkbox" :value="oi" @change="toggleCheck(questions[currentQ].id, oi)" :checked="isChecked(questions[currentQ].id, oi)" class="sr-only">
+<div class="w-5 h-5 rounded-md border-2 flex-shrink-0 flex items-center justify-center transition-all"
+:class="isChecked(questions[currentQ].id, oi) ? 'border-purple-600 bg-purple-600' : 'border-gray-300 dark:border-gray-600'">
+<svg x-show="isChecked(questions[currentQ].id, oi)" class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+</div>
+<span class="text-xs font-bold text-gray-400 w-4" x-text="String.fromCharCode(65+oi)"></span>
+<span class="text-sm text-gray-700 dark:text-gray-300 flex-1" x-text="opt.text || 'Pilihan ' + String.fromCharCode(65+oi)"></span>
+</label>
+</template>
+</div>
+
+<!-- True/False -->
+<div x-show="questions[currentQ].type === 'true_false'" class="flex gap-3">
+<label class="answer-card flex-1 flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 cursor-pointer"
+:class="answers[questions[currentQ].id] === 'true' ? 'selected' : ''">
+<input type="radio" :name="'q'+currentQ" value="true" x-model="answers[questions[currentQ].id]" @change="updateAnsweredCount()" class="sr-only">
+<span class="text-2xl">✓</span>
+<span class="text-sm font-bold text-gray-700 dark:text-gray-300">Benar</span>
+</label>
+<label class="answer-card flex-1 flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 cursor-pointer"
+:class="answers[questions[currentQ].id] === 'false' ? 'selected' : ''">
+<input type="radio" :name="'q'+currentQ" value="false" x-model="answers[questions[currentQ].id]" @change="updateAnsweredCount()" class="sr-only">
+<span class="text-2xl">✗</span>
+<span class="text-sm font-bold text-gray-700 dark:text-gray-300">Salah</span>
+</label>
+</div>
+
+<!-- Short answer -->
+<div x-show="questions[currentQ].type === 'short_answer'">
+<input type="text" x-model="answers[questions[currentQ].id]" @input="updateAnsweredCount()" placeholder="Ketik jawaban Anda..."
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+
+<!-- Essay -->
+<div x-show="questions[currentQ].type === 'essay'">
+<textarea x-model="answers[questions[currentQ].id]" @input="updateAnsweredCount()" rows="5" placeholder="Tulis jawaban Anda..."
+class="q-input resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"></textarea>
+</div>
+
+<!-- Rating -->
+<div x-show="questions[currentQ].type === 'rating'" class="space-y-3">
+<div class="flex gap-2 flex-wrap">
+<template x-for="i in Math.max(0, (questions[currentQ].ratingMax||5) - (questions[currentQ].ratingMin||1) + 1)" :key="i">
+<button @click="answers[questions[currentQ].id] = (questions[currentQ].ratingMin||1) + i - 1"
+:class="answers[questions[currentQ].id] === ((questions[currentQ].ratingMin||1) + i - 1) ? 'bg-purple-600 text-white border-purple-600 scale-110' : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-purple-400'"
+class="w-11 h-11 rounded-full border-2 text-sm font-bold transition-all"
+x-text="(questions[currentQ].ratingMin||1) + i - 1"></button>
+</template>
+</div>
+<div class="flex justify-between text-xs text-gray-400 dark:text-gray-500">
+<span x-text="'Sangat Tidak Setuju (' + (questions[currentQ].ratingMin||1) + ')'"></span>
+<span x-text="'Sangat Setuju (' + (questions[currentQ].ratingMax||5) + ')'"></span>
+</div>
+</div>
+
+<!-- Dropdown -->
+<div x-show="questions[currentQ].type === 'dropdown'">
+<select x-model.number="answers[questions[currentQ].id]" @change="updateAnsweredCount()"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+<option value="">-- Pilih jawaban --</option>
+<template x-for="(opt, oi) in questions[currentQ].options" :key="oi">
+<option :value="oi" x-text="opt.text || 'Opsi ' + (oi+1)"></option>
+</template>
+</select>
+</div>
+
+<!-- Date -->
+<div x-show="questions[currentQ].type === 'date'">
+<input type="date" x-model="answers[questions[currentQ].id]" @input="updateAnsweredCount()"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white w-auto">
+</div>
+
+<!-- Time -->
+<div x-show="questions[currentQ].type === 'time'">
+<input type="time" x-model="answers[questions[currentQ].id]" @input="updateAnsweredCount()"
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white w-auto">
+</div>
+
+<!-- Fill blank -->
+<div x-show="questions[currentQ].type === 'fill_blank'">
+<input type="text" x-model="answers[questions[currentQ].id]" @input="updateAnsweredCount()" placeholder="Isi jawaban..."
+class="q-input dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+</div>
+
+<!-- Points badge -->
+<div x-show="questions[currentQ].points > 0" class="mt-4 flex justify-end">
+<span class="text-xs text-purple-600 dark:text-purple-400 font-semibold bg-purple-50 dark:bg-purple-900/20 px-2.5 py-1 rounded-full" x-text="questions[currentQ].points + ' poin'"></span>
+</div>
+</div>
+
+<!-- Navigation -->
+<div class="flex items-center justify-between gap-3">
+<button @click="prevQ()" :disabled="currentQ === 0"
+class="btn flex items-center gap-2 px-5 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+Sebelumnya
+</button>
+
+<button x-show="currentQ < questions.length - 1" @click="nextQ()"
+class="btn flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">
+Selanjutnya
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+</button>
+
+<button x-show="currentQ === questions.length - 1" @click="confirmSubmit()"
+class="btn flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+Kirim Jawaban
+</button>
+</div>
+</div>
+</template>
+</div>
+
+<!-- Question navigator (bottom fixed) -->
+<div class="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg z-20">
+<div class="max-w-3xl mx-auto px-4 py-3">
+<div class="flex items-center gap-2 overflow-x-auto pb-1">
+<span class="text-xs font-bold text-gray-500 dark:text-gray-400 flex-shrink-0">Soal:</span>
+<template x-for="(q, i) in questions" :key="i">
+<button @click="goToQ(i)"
+class="q-dot flex-shrink-0 flex items-center justify-center"
+:class="i === currentQ ? 'current' : hasAnswer(q.id) ? 'answered' : 'unanswered'"
+x-text="i + 1"></button>
+</template>
+<button @click="confirmSubmit()"
+class="flex-shrink-0 ml-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg transition-all">
+Submit
+</button>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ===== CONFIRM SUBMIT MODAL ===== -->
+<div x-show="showConfirm" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" @click.self="showConfirm=false">
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" x-transition>
+<h3 class="text-base font-bold text-gray-800 dark:text-white mb-2">Kirim Jawaban?</h3>
+<div class="space-y-2 mb-5">
+<div class="flex justify-between text-sm">
+<span class="text-gray-500 dark:text-gray-400">Soal dijawab:</span>
+<span class="font-bold text-gray-800 dark:text-white" x-text="answeredCount + ' / ' + questions.length"></span>
+</div>
+<div x-show="answeredCount < questions.length" class="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5">
+⚠️ <span x-text="(questions.length - answeredCount) + ' soal belum dijawab'"></span>
+</div>
+</div>
+<div class="flex gap-3">
+<button @click="showConfirm=false" class="flex-1 py-2.5 text-sm font-semibold border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">Kembali</button>
+<button @click="submitQuiz()" :disabled="submitting"
+class="flex-1 py-2.5 text-sm font-semibold bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white rounded-xl transition-all flex items-center justify-center gap-2">
+<svg x-show="submitting" class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+<span x-text="submitting ? 'Mengirim...' : 'Ya, Kirim'"></span>
+</button>
+</div>
+</div>
+</div>
+
+<!-- ===== RESULTS SCREEN ===== -->
+<div x-show="phase === 'results'" class="min-h-screen py-8 px-4">
+<div class="max-w-2xl mx-auto space-y-5 fade-in">
+
+<!-- Score card -->
+<div class="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+<div class="gradient-header p-6 text-white text-center">
+<div class="text-lg font-bold mb-1" x-text="participant.name"></div>
+<div class="text-white/70 text-xs" x-text="participant.nim ? 'NIM: ' + participant.nim : ''"></div>
+</div>
+<div class="p-6 text-center">
+<!-- Score circle -->
+<div class="relative inline-flex items-center justify-center w-36 h-36 mb-4">
+<svg class="w-36 h-36 score-ring" viewBox="0 0 120 120">
+<circle class="score-ring-bg" cx="60" cy="60" r="45"/>
+<circle class="score-ring-fill" cx="60" cy="60" r="45"
+:stroke-dasharray="282.74"
+:stroke-dashoffset="282.74 * (1 - result.percentage / 100)"
+style="animation: scoreReveal 1.2s ease forwards;"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<div class="text-3xl font-extrabold text-purple-700 dark:text-purple-300" x-text="result.score + '/' + result.total"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400">poin</div>
+</div>
+</div>
+
+<div class="text-2xl font-bold text-gray-800 dark:text-white mb-1">
+<span x-text="result.percentage >= 80 ? '🎉 Luar Biasa!' : result.percentage >= 60 ? '👍 Bagus!' : result.percentage >= 40 ? '📚 Cukup' : '💪 Perlu Belajar Lagi'"></span>
+</div>
+<div class="text-gray-500 dark:text-gray-400 text-sm mb-3" x-text="Math.round(result.percentage) + '% benar'"></div>
+
+<!-- Pass/Fail badge -->
+<div x-show="quiz.settings?.passingScore > 0"
+:class="result.passed ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700'"
+class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-bold border mb-3">
+<span x-text="result.passed ? '✓ LULUS' : '✗ TIDAK LULUS'"></span>
+<span x-show="quiz.settings?.passingScore > 0" class="text-xs opacity-70" x-text="'(min. ' + quiz.settings?.passingScore + '%)'"></span>
+</div>
+
+<!-- Time taken -->
+<div class="text-xs text-gray-400 dark:text-gray-500" x-text="'Waktu pengerjaan: ' + formatTime(result.time_taken)"></div>
+</div>
+</div>
+
+<!-- Answer review (if showResults enabled) -->
+<div x-show="result.show_results">
+<h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+Review Jawaban
+</h3>
+<div class="space-y-3">
+<template x-for="(q, qi) in result.questions" :key="q.id">
+<div class="bg-white dark:bg-gray-800 rounded-2xl border overflow-hidden shadow-sm"
+:class="result.graded[q.id]?.correct ? 'border-green-300 dark:border-green-700' : 'border-red-300 dark:border-red-700'">
+<div class="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-bold"
+:class="result.graded[q.id]?.correct ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+<path x-show="result.graded[q.id]?.correct" fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+<path x-show="!result.graded[q.id]?.correct" fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+</svg>
+<span x-text="'Soal ' + (qi+1) + ': ' + (result.graded[q.id]?.correct ? 'Benar' : 'Salah')"></span>
+<span class="ml-auto" x-text="(result.graded[q.id]?.correct ? '+' : '0') + '/' + q.points + ' poin'"></span>
+</div>
+<div class="p-4">
+<p class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2" x-text="q.text"></p>
+
+<!-- Show options with correct/wrong highlight -->
+<template x-if="['multiple_choice','checkbox','dropdown'].includes(q.type) && result.show_correct">
+<div class="space-y-1.5">
+<template x-for="(opt, oi) in q.options" :key="oi">
+<div class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
+:class="getOptionClass(q, oi, result.graded[q.id])">
+<span class="font-bold" x-text="String.fromCharCode(65+oi)"></span>
+<span x-text="opt.text"></span>
+<svg x-show="isCorrectOption(q, oi)" class="ml-auto h-4 w-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+</div>
+</template>
+</div>
+</template>
+
+<template x-if="!['multiple_choice','checkbox','dropdown'].includes(q.type)">
+<div class="space-y-1 text-xs">
+<div class="text-gray-500 dark:text-gray-400">Jawaban Anda: <span class="font-semibold text-gray-700 dark:text-gray-300" x-text="getAnswerDisplay(q, result.graded[q.id]?.answer)"></span></div>
+<div x-show="result.show_correct && !result.graded[q.id]?.correct && q.type !== 'essay'" class="text-green-600 dark:text-green-400">Jawaban benar: <span class="font-semibold" x-text="q.correctAnswer || '-'"></span></div>
+</div>
+</template>
+</div>
+</div>
+</template>
+</div>
+</div>
+
+<!-- Action buttons -->
+<div class="flex gap-3">
+<a href="/quiz" class="flex-1 flex items-center justify-center gap-2 py-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">
+Dashboard
+</a>
+<button x-show="quiz.settings?.allowRetake" @click="retake()"
+class="flex-1 flex items-center justify-center gap-2 py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+Kerjakan Ulang
+</button>
+</div>
+</div>
+</div>
+
+<!-- Toast -->
+<div id="toast-root" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+<script>
+function takeQuiz() {
+return {
+phase: 'loading',
+quiz: {
+title: 'Quiz Sample',
+description: '',
+settings: { timeLimit: 0, showResults: true, allowRetake: false, passingScore: 0 },
+questions: []
+},
+questions: [],
+answers: {},
+participant: { name: '', nim: '' },
+currentQ: 0,
+answeredCount: 0,
+showConfirm: false,
+submitting: false,
+errorMsg: '',
+totalPoints: 0,
+result: {
+score: 0,
+total: 0,
+percentage: 0,
+passed: false,
+questions: [],
+graded: {},
+time_taken: 0,
+show_results: false,
+show_correct: false
+},
+tabWarnings: 0,
+timerDisplay: '00:00',
+timerColor: 'timer-normal',
+timerDashOffset: 100,
+timerClass: 'timer-normal',
+timerRemaining: 0,
+timerInterval: null,
+
+get quizId() {
+return new URLSearchParams(window.location.search).get('id') || '';
+},
+
+init() {
+this.loadQuiz();
+document.addEventListener('visibilitychange', () => {
+if (document.visibilityState === 'hidden') {
+this.tabWarnings += 1;
+}
+});
+},
+
+async loadQuiz() {
+if (!this.quizId) {
+this.errorMsg = 'Missing quiz ID di URL';
+this.phase = 'error';
+return;
+}
+
+try {
+const res = await fetch('/api/quiz?action=get_quiz&id=' + encodeURIComponent(this.quizId) + '&kelas=' + encodeURIComponent(new URLSearchParams(location.search).get('kelas') || ''));
+const data = await res.json();
+if (!data.ok) {
+this.errorMsg = data.error || 'Quiz tidak ditemukan';
+this.phase = 'error';
+return;
+}
+
+this.quiz = data.quiz;
+this.questions = data.quiz.questions || [];
+this.totalPoints = this.questions.reduce((sum, q) => sum + (Number(q.points) || 0), 0);
+this.updateAnsweredCount();
+this.phase = 'intro';
+} catch (err) {
+console.error('Load quiz error:', err);
+this.errorMsg = 'Terjadi kesalahan saat memuat quiz';
+this.phase = 'error';
+}
+},
+
+formatTime(seconds) {
+const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+const s = (seconds % 60).toString().padStart(2, '0');
+return `${m}:${s}`;
+},
+
+startQuiz() {
+if (!this.questions.length) return;
+this.phase = 'taking';
+this.currentQ = 0;
+this.updateAnsweredCount();
+this.startTimer();
+},
+
+startTimer() {
+if (this.timerInterval) {
+clearInterval(this.timerInterval);
+this.timerInterval = null;
+}
+const limit = Number(this.quiz.settings?.timeLimit) || 0;
+if (!limit) return;
+this.timerRemaining = limit * 60;
+this.updateTimer();
+this.timerInterval = setInterval(() => {
+if (this.timerRemaining <= 0) {
+clearInterval(this.timerInterval);
+this.timerInterval = null;
+this.submitQuiz();
+return;
+}
+this.timerRemaining -= 1;
+this.updateTimer();
+}, 1000);
+},
+
+updateTimer() {
+this.timerDisplay = this.formatTime(this.timerRemaining);
+const total = Number(this.quiz.settings?.timeLimit || 0) * 60;
+const progress = total > 0 ? this.timerRemaining / total : 0;
+this.timerDashOffset = 100.53 * (1 - progress);
+if (this.timerRemaining <= 30) {
+this.timerColor = 'timer-danger';
+this.timerClass = 'timer-danger';
+} else if (this.timerRemaining <= 60) {
+this.timerColor = 'timer-warning';
+this.timerClass = 'timer-warning';
+} else {
+this.timerColor = 'timer-normal';
+this.timerClass = 'timer-normal';
+}
+},
+
+nextQ() { if (this.currentQ < this.questions.length - 1) this.currentQ++; },
+prevQ() { if (this.currentQ > 0) this.currentQ--; },
+confirmSubmit() { this.showConfirm = true; },
+
+hasAnswer(questionId) {
+const answer = this.answers[questionId];
+if (Array.isArray(answer)) return answer.length > 0;
+return answer !== undefined && answer !== null && answer !== '';
+},
+
+updateAnsweredCount() {
+this.answeredCount = this.questions.filter(q => this.hasAnswer(q.id)).length;
+},
+
+goToQ(index) {
+if (index >= 0 && index < this.questions.length) {
+this.currentQ = index;
+}
+},
+
+isChecked(questionId, optionIndex) {
+const value = this.answers[questionId];
+return Array.isArray(value) && value.includes(optionIndex);
+},
+
+toggleCheck(questionId, optionIndex) {
+const current = Array.isArray(this.answers[questionId]) ? [...this.answers[questionId]] : [];
+const idx = current.indexOf(optionIndex);
+if (idx === -1) {
+current.push(optionIndex);
+} else {
+current.splice(idx, 1);
+}
+this.answers[questionId] = current;
+this.updateAnsweredCount();
+},
+
+getAnswerDisplay(q, answer) {
+if (answer === undefined || answer === null || answer === '') return '-';
+if (Array.isArray(answer)) {
+return answer.map(i => String.fromCharCode(65 + Number(i))).join(', ');
+}
+if (['multiple_choice', 'dropdown'].includes(q.type)) {
+const index = Number(answer);
+return q.options?.[index]?.text || answer;
+}
+return String(answer);
+},
+
+getOptionClass(q, oi, graded) {
+const correct = this.isCorrectOption(q, oi);
+const selected = graded?.answer !== undefined && (graded.answer === oi || (Array.isArray(graded.answer) && graded.answer.includes(oi)));
+if (correct) {
+return 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300';
+}
+if (selected) {
+return 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300';
+}
+return 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700';
+},
+
+isCorrectOption(q, oi) {
+if (q.type === 'checkbox') {
+const correct = Array.isArray(q.correctAnswers) ? q.correctAnswers.map(Number) : [];
+return correct.includes(Number(oi));
+}
+return Number(q.correctAnswer) === Number(oi);
+},
+
+retake() {
+this.phase = 'intro';
+this.currentQ = 0;
+this.answers = {};
+this.answeredCount = 0;
+this.showConfirm = false;
+this.submitting = false;
+this.result = {
+score: 0,
+total: 0,
+percentage: 0,
+passed: false,
+questions: [],
+graded: {},
+time_taken: 0,
+show_results: false,
+show_correct: false
+};
+},
+
+async submitQuiz() {
+if (this.submitting) return;
+this.showConfirm = false;
+this.submitting = true;
+
+const timeTaken = this.quiz.settings?.timeLimit ? ((Number(this.quiz.settings.timeLimit) * 60) - this.timerRemaining) : 0;
+if (this.timerInterval) {
+clearInterval(this.timerInterval);
+this.timerInterval = null;
+}
+
+try {
+const res = await fetch('/api/quiz?action=submit_quiz', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+kelas: new URLSearchParams(location.search).get('kelas') || '',
+quiz_id: this.quizId,
+name: this.participant.name.trim() || 'Anonim',
+nim: this.participant.nim.trim(),
+answers: this.answers,
+time_taken: timeTaken
+})
+});
+const data = await res.json();
+if (!data.ok) {
+alert('Error submit: ' + (data.error || 'Unknown error'));
+this.submitting = false;
+return;
+}
+
+this.result.score = data.score;
+this.result.total = data.total;
+this.result.percentage = data.percentage;
+this.result.passed = data.passed;
+this.result.time_taken = data.time_taken;
+this.result.graded = data.graded || {};
+if (data.answer_key) { this.questions.forEach((q) => { const k = data.answer_key[q.id]; if (k) Object.assign(q, k); }); }
+this.result.questions = this.questions;
+this.result.show_results = this.quiz.settings?.showResults || false;
+this.result.show_correct = this.quiz.settings?.showCorrectAnswers || false;
+this.phase = 'results';
+} catch (err) {
+console.error('Submit error:', err);
+alert('Terjadi kesalahan saat submit quiz.');
+this.submitting = false;
+}
+}
+}
+}
+</script>

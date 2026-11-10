@@ -1,0 +1,91 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { all, run } from '../../lib/db';
+import { JURUSAN } from '../../lib/jurusan';
+import { flashUrl, str, int } from '../../lib/util';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const aksi = str(f.get('aksi'));
+  if (aksi === 'tambah' || aksi === 'edit') {
+    const nama = str(f.get('nama_matkul')).slice(0, 150);
+    const sks = int(f.get('sks'));
+    const jurusan = str(f.get('jurusan'));
+    const semester = int(f.get('semester'));
+    if (!nama || sks <= 0 || !jurusan || semester <= 0) return Astro.redirect(flashUrl('/admin/matkul', 'err', 'Semua data mata kuliah wajib diisi dengan benar.'));
+    if (aksi === 'tambah') run('INSERT INTO matkul(nama_matkul, sks, jurusan, semester) VALUES (?,?,?,?)', nama, sks, jurusan, semester);
+    else run('UPDATE matkul SET nama_matkul = ?, sks = ?, jurusan = ?, semester = ? WHERE id = ?', nama, sks, jurusan, semester, int(f.get('id')));
+    return Astro.redirect(flashUrl('/admin/matkul', 'ok', aksi === 'tambah' ? 'Mata kuliah ditambahkan.' : 'Mata kuliah diperbarui.'));
+  }
+  if (aksi === 'hapus') {
+    run('DELETE FROM matkul WHERE id = ?', int(f.get('id')));
+    return Astro.redirect(flashUrl('/admin/matkul', 'ok', 'Mata kuliah dihapus.'));
+  }
+}
+const list = all<{ id: number; nama_matkul: string; sks: number; jurusan: string; semester: number }>('SELECT * FROM matkul ORDER BY nama_matkul');
+// Pemakaian per semester (dari tabel jadwal): "Ganjil 2026/2027: B, C, D"
+const pakai = new Map<number, { semester: string; aktif: number; kelas: string }[]>();
+for (const r of all<{ matkul_id: number; semester: string; aktif: number; kelas: string }>(
+  `SELECT j.matkul_id, s.nama semester, s.aktif, GROUP_CONCAT(j.kelas, ', ') kelas FROM jadwal j JOIN semester s ON s.id = j.semester_id
+   GROUP BY j.matkul_id, s.id ORDER BY s.id DESC`)) {
+  if (!pakai.has(r.matkul_id)) pakai.set(r.matkul_id, []);
+  pakai.get(r.matkul_id)!.push(r);
+}
+---
+<AdminLayout title="Kelola Mata Kuliah" active="matkul" alpine>
+  <div class="mb-6"><h1 class="text-2xl font-extrabold tracking-tight">Kelola Mata Kuliah</h1><p class="text-sm text-gray-500">Master mata kuliah. Pembagian kelas, dosen, dan asisten per semester diatur di <a href="/admin/jadwal" class="text-blue-600 font-semibold">Jadwal Semester</a>.</p></div>
+  <div class="grid lg:grid-cols-3 gap-6" x-data="{ edit: null }">
+    <form method="post" class="card p-6 space-y-4 h-fit">
+      <input type="hidden" name="aksi" value="tambah" />
+      <h2 class="font-extrabold flex items-center gap-2"><Icon name="plus" /> Tambah Mata Kuliah</h2>
+      <div><label class="label">Nama Mata Kuliah</label><input name="nama_matkul" class="input" required placeholder="Algoritma dan Struktur Data" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">SKS</label><input type="number" name="sks" min="1" max="8" value="2" class="input" required /></div>
+        <div><label class="label">Semester</label><input type="number" name="semester" min="1" max="14" value="1" class="input" required /></div>
+      </div>
+      <div><label class="label">Jurusan</label><select name="jurusan" class="input" required><option value="">Pilih Jurusan</option>{JURUSAN.map((j) => <option value={j.kode}>{j.nama}</option>)}</select></div>
+      <button class="btn btn-primary w-full">Simpan</button>
+    </form>
+    <div class="lg:col-span-2 card overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center"><h2 class="font-extrabold">Daftar Mata Kuliah</h2><span class="badge bg-gray-100 dark:bg-gray-700">{list.length}</span></div>
+      <div class="overflow-x-auto">
+      <table class="w-full min-w-[720px]">
+        <thead class="bg-gray-50 dark:bg-gray-900/50"><tr><th class="th w-12">No</th><th class="th">Mata Kuliah</th><th class="th">Jurusan</th><th class="th">SKS</th><th class="th">Sem.</th><th class="th">Dipakai di jadwal</th><th class="th text-right">Aksi</th></tr></thead>
+        <tbody class="divide-y divide-gray-100 dark:divide-gray-700/60">
+          {list.length === 0 && <tr><td colspan="7" class="p-8 text-center text-gray-500 text-sm">Belum ada data mata kuliah.</td></tr>}
+          {list.map((m, i) => (
+            <>
+              <tr>
+                <td class="td text-gray-400">{i + 1}</td>
+                <td class="td font-semibold">{m.nama_matkul}</td>
+                <td class="td"><span class="badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{m.jurusan}</span></td>
+                <td class="td">{m.sks}</td>
+                <td class="td">{m.semester}</td>
+                <td class="td">{(pakai.get(m.id) ?? []).length ? (pakai.get(m.id) ?? []).map((p) => <span class:list={['badge mr-1 mb-1', p.aktif ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300']}>{p.semester}: {p.kelas}</span>) : <span class="text-xs text-gray-400">belum dipakai</span>}</td>
+                <td class="td text-right whitespace-nowrap">
+                  <button type="button" class="btn btn-sm btn-ghost" @click={`edit = edit === ${m.id} ? null : ${m.id}`}><Icon name="pencil" class="w-3.5 h-3.5" /></button>
+                  <form method="post" class="inline" onsubmit="return confirm('Hapus mata kuliah ini?')"><input type="hidden" name="aksi" value="hapus" /><input type="hidden" name="id" value={m.id} />
+                    <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+                </td>
+              </tr>
+              <tr x-show={`edit === ${m.id}`} class="bg-gray-50 dark:bg-gray-900/30">
+                <td colspan="7" class="px-4 py-3">
+                  <form method="post" class="flex flex-wrap gap-2 items-center">
+                    <input type="hidden" name="aksi" value="edit" /><input type="hidden" name="id" value={m.id} />
+                    <input name="nama_matkul" value={m.nama_matkul} class="input !py-1.5 flex-1 min-w-[200px]" required />
+                    <select name="jurusan" class="input !py-1.5 !w-auto">{JURUSAN.map((j) => <option value={j.kode} selected={j.kode === m.jurusan}>{j.kode}</option>)}</select>
+                    <input type="number" name="sks" value={m.sks} min="1" class="input !py-1.5 !w-20" title="SKS" />
+                    <input type="number" name="semester" value={m.semester} min="1" class="input !py-1.5 !w-20" title="Semester" />
+                    <button class="btn btn-sm btn-primary">Simpan</button>
+                  </form>
+                </td>
+              </tr>
+            </>
+          ))}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+</AdminLayout>

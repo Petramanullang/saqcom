@@ -1,0 +1,231 @@
+---
+import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
+import KelasPicker from '../components/KelasPicker.astro';
+import { listKelas, sesiTerbukaPerKelas } from '../lib/tugas';
+import { hostnameDariIp } from '../lib/auth';
+import { fmtWaktu } from '../lib/util';
+
+const { settings, ip, pc } = Astro.locals;
+const kelas = listKelas(true);
+const sesi = sesiTerbukaPerKelas();
+const hostname = await hostnameDariIp(ip);
+const data = {
+  kelas: kelas.map((k) => ({ id: k.id, nama: k.nama, warna: k.warna })),
+  sesi: Object.fromEntries(Object.entries(sesi).map(([k, list]) => [k, list.map((s) => ({
+    id: s.id, judul: s.judul, deadline: s.deadline, deadlineFmt: fmtWaktu(s.deadline), tolak: !!s.tolak_terlambat,
+  }))])),
+  maxFileMb: settings.maxFileMb,
+  maxTotalMb: settings.maxTotalMb,
+  allowedExt: settings.allowedExt,
+  serverNow: Date.now(),
+};
+---
+<Base title="Upload Tugas" active="upload" alpine>
+  <script is:inline type="application/json" id="upload-data" set:html={JSON.stringify(data).replace(/</g, '\\u003c')}></script>
+
+  <div class="grid lg:grid-cols-5 gap-6" x-data="uploadForm" x-cloak>
+    <!-- Kolom kiri: form -->
+    <section class="lg:col-span-3 card p-5 sm:p-8">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/20"><Icon name="upload" class="w-5 h-5" /></div>
+        <div>
+          <h1 class="text-xl font-extrabold tracking-tight">Upload Tugas Praktikum</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Sistem pengumpulan tugas Lab SAQ</p>
+        </div>
+      </div>
+
+      <!-- Bukti pengumpulan -->
+      <template x-if="hasil">
+        <div class="rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/10 p-5 sm:p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center"><Icon name="check" class="w-5 h-5" stroke={3} /></div>
+            <div>
+              <p class="font-extrabold text-emerald-700 dark:text-emerald-300">Tugas berhasil dikumpulkan!</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">Simpan / foto kode bukti di bawah ini.</p>
+            </div>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-3 text-sm mb-4">
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-3"><p class="label !mb-0.5">Kode Bukti</p><p class="font-mono text-lg font-black tracking-widest" x-text="hasil.kode"></p></div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-3"><p class="label !mb-0.5">Waktu</p><p class="font-semibold" x-text="hasil.waktu"></p></div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-3"><p class="label !mb-0.5">Kelas</p><p class="font-semibold" x-text="hasil.kelas"></p></div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-3"><p class="label !mb-0.5">Tugas</p><p class="font-semibold" x-text="hasil.sesi || 'Umum (tanpa sesi)'"></p></div>
+          </div>
+          <template x-if="hasil.terlambat"><p class="mb-3 text-sm font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-2"><Icon name="alert" /> Dikumpulkan setelah batas waktu (tercatat terlambat).</p></template>
+          <template x-if="hasil.versiKe > 1"><p class="mb-3 text-sm text-blue-700 dark:text-blue-300">Ini upload ke-<span x-text="hasil.versiKe"></span> Anda untuk tugas ini. Asisten akan memakai versi terbaru.</p></template>
+          <ul class="space-y-1.5 mb-5">
+            <template x-for="f in hasil.files"><li class="flex justify-between text-sm bg-white dark:bg-gray-800 rounded-lg px-3 py-2"><span class="truncate" x-text="f.nama"></span><span class="text-gray-400 shrink-0 ml-3" x-text="f.ukuran"></span></li></template>
+          </ul>
+          <button type="button" class="btn btn-ghost w-full" @click="reset()">Upload tugas lain</button>
+        </div>
+      </template>
+
+      <form x-show="!hasil" @submit.prevent="kirim" class="space-y-6" novalidate>
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="label" for="nim">NIM</label>
+            <input id="nim" class="input font-mono" inputmode="numeric" autocomplete="off" placeholder="202431170" x-model="nim" @input="nim = nim.replace(/\D/g,'')" maxlength="15" required />
+          </div>
+          <div>
+            <label class="label" for="nama">Nama Lengkap</label>
+            <input id="nama" class="input" autocomplete="off" placeholder="Gangsar Anjasmoro" x-model="nama" maxlength="80" required />
+          </div>
+        </div>
+
+        <div>
+          <span class="label">Pilih Kelas</span>
+          <div @kelas-dipilih="pilihKelas($event.detail)">
+            <KelasPicker name="kelas_pilih" mode="kelasTugas" manual placeholder="Pilih kelas praktikum Anda…" />
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1.5">Otomatis memilih kelas yang sedang berlangsung sesuai jadwal. Ganti jika Anda dari kelas lain / kelas pengganti.</p>
+          {kelas.length === 0 && <p class="text-sm text-gray-500">Belum ada kelas aktif. Hubungi asisten.</p>}
+        </div>
+
+        <!-- Pilih tugas/pertemuan -->
+        <div x-show="kelas && daftarSesi.length" x-transition>
+          <span class="label">Tugas / Pertemuan</span>
+          <div class="grid gap-2">
+            <template x-for="s in daftarSesi" :key="s.id">
+              <button type="button" @click="sesi = s.id"
+                class="text-left p-3.5 rounded-2xl border-2 transition-all cursor-pointer"
+                :class="sesi === s.id ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-bold text-sm" x-text="s.judul"></span>
+                  <span x-show="s.deadline" class="badge" :class="lewat(s) ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'" x-text="sisa(s)"></span>
+                </div>
+                <p x-show="s.deadline" class="text-xs text-gray-500 mt-1">Batas: <span x-text="s.deadlineFmt"></span><span x-show="s.tolak" class="text-red-500 font-semibold"> · tidak menerima keterlambatan</span></p>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-end justify-between mb-1.5">
+            <span class="label !mb-0">Pilih File</span>
+            <span class="text-[11px] font-semibold text-gray-400" x-text="cfg.allowedExt.length ? cfg.allowedExt.map(e => '.' + e).join(' ') : 'Semua format'"></span>
+          </div>
+          <label for="files"
+            class="flex flex-col items-center justify-center gap-2 p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-colors text-center"
+            :class="drag ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600 hover:border-blue-400 bg-gray-50/50 dark:bg-gray-900/30'"
+            @dragover.prevent="drag = true" @dragleave.prevent="drag = false" @drop.prevent="drag = false; tambah($event.dataTransfer.files)">
+            <Icon name="upload" class="w-10 h-10 text-gray-400" stroke={1.5} />
+            <p class="text-sm"><span class="font-bold text-blue-600 dark:text-blue-400">Pilih file</span> atau drag &amp; drop ke sini</p>
+            <p class="text-xs text-gray-400">Maks. <span x-text="cfg.maxFileMb"></span> MB per file · total <span x-text="cfg.maxTotalMb"></span> MB</p>
+          </label>
+          <input id="files" type="file" multiple class="hidden" @change="tambah($event.target.files); $event.target.value = ''" />
+
+          <ul class="mt-3 space-y-2" x-show="files.length">
+            <template x-for="(f, i) in files" :key="f.name + f.size">
+              <li class="flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                <span class="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-black uppercase text-gray-500" x-text="ext(f.name) || 'file'"></span>
+                <div class="min-w-0 flex-1"><p class="text-sm font-semibold truncate" x-text="f.name"></p><p class="text-xs text-gray-400" x-text="ukuran(f.size)"></p></div>
+                <button type="button" class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer" @click="files.splice(i, 1)" :disabled="loading" aria-label="Hapus"><Icon name="x" /></button>
+              </li>
+            </template>
+          </ul>
+        </div>
+
+        <div x-show="error" class="p-3.5 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300 flex gap-2"><Icon name="alert" class="w-4 h-4 shrink-0 mt-0.5" /><span x-text="error"></span></div>
+
+        <div x-show="loading" class="space-y-1.5">
+          <div class="h-2.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden"><div class="h-full bg-blue-600 transition-all" :style="`width:${progress}%`"></div></div>
+          <p class="text-xs text-gray-500 text-center">Mengupload… <span x-text="progress + '%'"></span></p>
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full !py-3.5 !text-base" :disabled="loading || !files.length">
+          <Icon name="upload" class="w-5 h-5" /> <span x-text="loading ? 'Mengupload…' : 'Kumpulkan Tugas'"></span>
+        </button>
+      </form>
+    </section>
+
+    <!-- Kolom kanan: panduan -->
+    <aside class="lg:col-span-2 space-y-6">
+      <div class="card p-6">
+        <h2 class="font-extrabold mb-4">Langkah-langkah</h2>
+        <ol class="space-y-3 text-sm text-gray-600 dark:text-gray-300">
+          <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-black flex items-center justify-center shrink-0">1</span><span>Isi <b>NIM</b> dan <b>nama lengkap</b> sesuai SIAKAD.</span></li>
+          <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-black flex items-center justify-center shrink-0">2</span><span>Pilih <b>kelas</b>, lalu <b>tugas/pertemuan</b> jika ada.</span></li>
+          <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-black flex items-center justify-center shrink-0">3</span><span>Pilih <b>semua file sekaligus</b>, lalu klik <b>Kumpulkan Tugas</b>.</span></li>
+          <li class="flex gap-3"><span class="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-black flex items-center justify-center shrink-0">4</span><span>Simpan <b>kode bukti</b> yang muncul.</span></li>
+        </ol>
+      </div>
+      <div class="card p-6">
+        <h2 class="font-extrabold mb-3">Catatan Penting</h2>
+        <ul class="space-y-2.5 text-sm text-gray-600 dark:text-gray-300 list-disc pl-5">
+          <li>Upload <b>semua file dalam satu kali</b> pengiriman.</li>
+          <li>Jika perlu revisi, upload ulang — asisten melihat <b>versi terbaru</b>, versi lama tetap tersimpan.</li>
+          <li>Setiap upload dicatat bersama identitas komputer Anda untuk pelacakan.</li>
+        </ul>
+        <div class="mt-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-900/50 text-xs text-gray-500 dark:text-gray-400">
+          Komputer Anda: <b class="text-gray-700 dark:text-gray-200">{hostname}</b>{pc ? ` · PC ${pc}` : ''} · {ip}
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script is:inline>
+    document.addEventListener('alpine:init', () => {
+      const D = JSON.parse(document.getElementById('upload-data').textContent);
+      const offset = D.serverNow - Date.now();
+      Alpine.data('uploadForm', () => ({
+        cfg: D, nim: '', nama: '', kelas: null, sesi: null, files: [], drag: false,
+        loading: false, progress: 0, error: '', hasil: null, now: Date.now() + offset,
+        init() {
+          try { this.nim = localStorage.getItem('saq_nim') || ''; this.nama = localStorage.getItem('saq_nama') || ''; } catch (e) {}
+          setInterval(() => { this.now = Date.now() + offset; }, 30000);
+        },
+        get daftarSesi() { return (this.kelas && D.sesi[this.kelas]) || []; },
+        pilihKelas(it) { this.kelas = it ? Number(it.value) : null; const l = this.daftarSesi; this.sesi = l.length === 1 ? l[0].id : null; this.error = ''; },
+        tsDeadline(s) { return s.deadline ? new Date(s.deadline.replace(' ', 'T') + '+07:00').getTime() : 0; },
+        lewat(s) { return s.deadline && this.now > this.tsDeadline(s); },
+        sisa(s) {
+          const ms = this.tsDeadline(s) - this.now;
+          if (ms <= 0) return 'Lewat batas';
+          const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+          return d > 0 ? `${d} hari lagi` : h > 0 ? `${h} jam ${m % 60} mnt lagi` : `${m} menit lagi`;
+        },
+        ext(n) { const i = n.lastIndexOf('.'); return i > 0 ? n.slice(i + 1).toLowerCase() : ''; },
+        ukuran(b) { return b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(2) + ' MB'; },
+        tambah(list) {
+          this.error = '';
+          for (const f of Array.from(list || [])) {
+            const e = this.ext(f.name);
+            if (D.allowedExt.length && !D.allowedExt.includes(e)) { this.error = `Format .${e} tidak diizinkan.`; continue; }
+            if (f.size > D.maxFileMb * 1048576) { this.error = `File ${f.name} melebihi ${D.maxFileMb} MB.`; continue; }
+            if (this.files.some((x) => x.name === f.name && x.size === f.size)) continue;
+            this.files.push(f);
+          }
+          const total = this.files.reduce((a, f) => a + f.size, 0);
+          if (total > D.maxTotalMb * 1048576) this.error = `Total ukuran file melebihi ${D.maxTotalMb} MB.`;
+        },
+        kirim() {
+          this.error = '';
+          if (this.nim.length < 5) return (this.error = 'NIM wajib diisi (angka 5–15 digit).');
+          if (this.nama.trim().length < 2) return (this.error = 'Nama lengkap wajib diisi.');
+          if (!this.kelas) return (this.error = 'Silakan pilih kelas Anda.');
+          if (this.daftarSesi.length && !this.sesi) return (this.error = 'Pilih tugas/pertemuan yang ingin dikumpulkan.');
+          const s = this.daftarSesi.find((x) => x.id === this.sesi);
+          if (s && s.tolak && this.lewat(s)) return (this.error = 'Batas waktu tugas ini sudah lewat.');
+          if (!this.files.length) return (this.error = 'Silakan pilih file terlebih dahulu.');
+          try { localStorage.setItem('saq_nim', this.nim); localStorage.setItem('saq_nama', this.nama); } catch (e) {}
+          const fd = new FormData();
+          fd.append('nim', this.nim); fd.append('nama', this.nama); fd.append('kelas', this.kelas); fd.append('sesi', this.sesi || '');
+          this.files.forEach((f) => fd.append('files', f));
+          this.loading = true; this.progress = 0;
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/api/upload');
+          xhr.upload.onprogress = (e) => { if (e.lengthComputable) this.progress = Math.round((e.loaded / e.total) * 100); };
+          xhr.onload = () => {
+            this.loading = false;
+            let r; try { r = JSON.parse(xhr.responseText); } catch (e) { r = { status: 'error', message: 'Respons server tidak valid.' }; }
+            if (r.status === 'success') { this.hasil = r; this.files = []; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+            else this.error = r.message || 'Upload gagal.';
+          };
+          xhr.onerror = () => { this.loading = false; this.error = 'Koneksi ke server terputus. Coba lagi.'; };
+          xhr.send(fd);
+        },
+        reset() { this.hasil = null; this.sesi = this.daftarSesi.length === 1 ? this.daftarSesi[0].id : null; this.files = []; this.error = ''; },
+      }));
+    });
+  </script>
+</Base>

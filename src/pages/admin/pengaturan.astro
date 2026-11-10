@@ -1,0 +1,119 @@
+---
+import path from 'node:path';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { saveSettings, getSettings } from '../../lib/settings';
+import { imporDariPhp, type LaporanImpor } from '../../lib/impor';
+import { DATA_DIR, BLOCKED_EXT } from '../../lib/config';
+import { str, int, flashUrl } from '../../lib/util';
+
+let laporan: LaporanImpor | null = null;
+let folderLama = path.resolve(process.cwd(), '..', 'saq');
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const aksi = str(form.get('aksi'));
+  if (aksi === 'simpan') {
+    const list = (v: string) => v.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    const ext = (v: string) => list(v.toLowerCase()).map((x) => x.replace(/^\./, '')).filter((x) => !BLOCKED_EXT.includes(x));
+    const ips = list(str(form.get('adminIps'))).filter((x) => /^[0-9a-fA-F.:]+$/.test(x));
+    const prefix = str(form.get('labIpPrefix'));
+    saveSettings({
+      adminIps: ips,
+      allowLocalhostAdmin: !!form.get('allowLocalhostAdmin'),
+      labIpPrefix: prefix.endsWith('.') ? prefix : prefix + '.',
+      jumlahPc: Math.min(200, Math.max(1, int(form.get('jumlahPc'), 42))),
+      screenTaskUrl: str(form.get('screenTaskUrl')),
+      maxFileMb: Math.min(500, Math.max(1, int(form.get('maxFileMb'), 10))),
+      maxTotalMb: Math.min(2000, Math.max(1, int(form.get('maxTotalMb'), 50))),
+      allowedExt: ext(str(form.get('allowedExt'))),
+      materiExt: ext(str(form.get('materiExt'))),
+      materiMaxMb: Math.min(2000, Math.max(1, int(form.get('materiMaxMb'), 50))),
+      lokasiLab: str(form.get('lokasiLab')) || 'SAQ Lab',
+    });
+    const s = getSettings();
+    // Cegah admin mengunci dirinya sendiri
+    const ipSaya = Astro.locals.ip;
+    const masihAdmin = ipSaya === '127.0.0.1' || ipSaya === '::1' ? s.allowLocalhostAdmin : s.adminIps.includes(ipSaya);
+    if (!masihAdmin) {
+      saveSettings({ adminIps: [...s.adminIps, ipSaya] });
+      return Astro.redirect(flashUrl('/admin/pengaturan', 'ok', `Pengaturan disimpan. IP Anda (${ipSaya}) otomatis tetap ditambahkan agar tidak terkunci.`));
+    }
+    return Astro.redirect(flashUrl('/admin/pengaturan', 'ok', 'Pengaturan disimpan.'));
+  }
+  if (aksi === 'impor') {
+    folderLama = str(form.get('folder'));
+    laporan = imporDariPhp(folderLama);
+  }
+}
+const s = getSettings();
+---
+<AdminLayout title="Pengaturan" active="pengaturan">
+  <div class="mb-6">
+    <h1 class="text-2xl font-extrabold tracking-tight">Pengaturan</h1>
+    <p class="text-sm text-gray-500">IP admin, jaringan lab, batas upload, dan impor data dari versi PHP.</p>
+  </div>
+
+  <div class="grid lg:grid-cols-3 gap-6">
+    <form method="post" class="lg:col-span-2 card p-6 space-y-6">
+      <input type="hidden" name="aksi" value="simpan" />
+      <section class="space-y-4">
+        <h2 class="font-extrabold flex items-center gap-2"><Icon name="shield" /> Akses Admin / Asisten</h2>
+        <div>
+          <label class="label">IP PC Admin & Asisten</label>
+          <textarea name="adminIps" rows="3" class="input font-mono">{s.adminIps.join('\n')}</textarea>
+          <p class="text-xs text-gray-500 mt-1">Satu IP per baris. IP Anda sekarang: <code class="font-mono">{Astro.locals.ip}</code></p>
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="allowLocalhostAdmin" checked={s.allowLocalhostAdmin} class="accent-blue-600" /> PC server (localhost) selalu dianggap admin</label>
+      </section>
+      <section class="grid sm:grid-cols-3 gap-4">
+        <h2 class="sm:col-span-3 font-extrabold flex items-center gap-2"><Icon name="screen" /> Jaringan Lab</h2>
+        <div><label class="label">Prefix IP lab</label><input name="labIpPrefix" value={s.labIpPrefix} class="input font-mono" /></div>
+        <div><label class="label">Jumlah PC</label><input type="number" name="jumlahPc" value={s.jumlahPc} min="1" max="200" class="input" /></div>
+        <div><label class="label">Lokasi (tiket)</label><input name="lokasiLab" value={s.lokasiLab} class="input" /></div>
+        <div class="sm:col-span-3"><label class="label">URL ScreenTask Dosen</label><input name="screenTaskUrl" value={s.screenTaskUrl} class="input font-mono" /></div>
+        <p class="sm:col-span-3 text-xs text-gray-500">IP <code>{s.labIpPrefix}N</code> dianggap PC nomor N (dipakai Kontrak Tempat Duduk & deteksi PC).</p>
+      </section>
+      <section class="grid sm:grid-cols-2 gap-4">
+        <h2 class="sm:col-span-2 font-extrabold flex items-center gap-2"><Icon name="upload" /> Upload Tugas</h2>
+        <div><label class="label">Maks. per file (MB)</label><input type="number" name="maxFileMb" value={s.maxFileMb} class="input" /></div>
+        <div><label class="label">Maks. total sekali upload (MB)</label><input type="number" name="maxTotalMb" value={s.maxTotalMb} class="input" /></div>
+        <div class="sm:col-span-2">
+          <label class="label">Format yang diizinkan</label>
+          <input name="allowedExt" value={s.allowedExt.join(', ')} class="input font-mono" placeholder="kosong = semua format, contoh: cpp, py, js, pdf, zip" />
+          <p class="text-xs text-gray-500 mt-1">Selalu diblokir demi keamanan: <span class="font-mono">{BLOCKED_EXT.slice(0, 12).join(', ')}, …</span></p>
+        </div>
+      </section>
+      <section class="grid sm:grid-cols-2 gap-4">
+        <h2 class="sm:col-span-2 font-extrabold flex items-center gap-2"><Icon name="book" /> Upload Materi</h2>
+        <div><label class="label">Format materi</label><input name="materiExt" value={s.materiExt.join(', ')} class="input font-mono" /></div>
+        <div><label class="label">Maks. ukuran materi (MB)</label><input type="number" name="materiMaxMb" value={s.materiMaxMb} class="input" /></div>
+      </section>
+      <button class="btn btn-primary"><Icon name="check" /> Simpan Pengaturan</button>
+    </form>
+
+    <aside class="space-y-6">
+      <form method="post" class="card p-6 space-y-3">
+        <input type="hidden" name="aksi" value="impor" />
+        <h2 class="font-extrabold flex items-center gap-2"><Icon name="refresh" /> Impor Data Versi PHP</h2>
+        <p class="text-xs text-gray-500">Salin dosen, matkul, materi, kontrak, laporan kerusakan, quiz, dan semua tugas di <code>uploads/</code> dari aplikasi lama. File lama <b>tidak diubah</b>. Aman dijalankan berulang.</p>
+        <label class="label">Folder project PHP lama</label>
+        <input name="folder" value={folderLama} class="input font-mono !text-xs" required />
+        <button class="btn btn-dark w-full">Mulai Impor</button>
+        {laporan && (
+          <div class:list={['p-3 rounded-xl text-sm', laporan.ok ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20']}>
+            {laporan.pesan.map((p) => <p class="text-xs mb-1">{p}</p>)}
+            {Object.entries(laporan.jumlah).length > 0 && (
+              <ul class="mt-2 space-y-0.5 text-xs">{Object.entries(laporan.jumlah).map(([k, v]) => <li><b>{v}</b> {k}</li>)}</ul>
+            )}
+          </div>
+        )}
+      </form>
+      <div class="card p-6 text-xs text-gray-500 space-y-2">
+        <h2 class="font-extrabold text-sm text-gray-900 dark:text-white">Lokasi Data</h2>
+        <p class="font-mono break-all">{DATA_DIR}</p>
+        <p>Berisi <code>saq.db</code> (database), <code>uploads/</code> (tugas), dan <code>materi/</code>. Backup cukup dengan menyalin folder ini.</p>
+      </div>
+    </aside>
+  </div>
+</AdminLayout>

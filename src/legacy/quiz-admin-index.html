@@ -1,0 +1,343 @@
+<!--ATTRS "class=\"bg-gray-50 dark:bg-gray-900 min-h-screen\" x-data=\"dashboard()\" x-cloak" -->
+<!--STYLE-->
+
+<!--/STYLE-->
+
+
+<!-- ===== NAV ===== -->
+<!--NAV-->
+
+<!-- ===== HERO ===== -->
+<div class="gradient-header text-white py-10 px-4">
+<div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+<div>
+<h1 class="text-3xl font-extrabold tracking-tight mb-1">Quiz Dashboard</h1>
+<p class="text-white/70 text-sm">Kelola semua quiz, pantau pengerjaan mahasiswa</p>
+</div>
+<a href="/admin/quiz/builder"
+class="btn flex items-center gap-2 px-5 py-2.5 bg-white text-purple-700 font-semibold rounded-xl shadow-md hover:bg-purple-50 text-sm transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+Buat Quiz Baru
+</a>
+</div>
+</div>
+
+<!-- ===== STATS BAR ===== -->
+<div class="max-w-6xl mx-auto px-4 -mt-5 mb-6">
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+</div>
+<div>
+<div class="text-xl font-bold text-gray-800 dark:text-white" x-text="stats.total"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400">Total Quiz</div>
+</div>
+</div>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+</div>
+<div>
+<div class="text-xl font-bold text-gray-800 dark:text-white" x-text="stats.open"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400">Sedang Buka</div>
+</div>
+</div>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+</div>
+<div>
+<div class="text-xl font-bold text-gray-800 dark:text-white" x-text="stats.locked"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400">Terkunci</div>
+</div>
+</div>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+</div>
+<div>
+<div class="text-xl font-bold text-gray-800 dark:text-white" x-text="stats.submissions"></div>
+<div class="text-xs text-gray-500 dark:text-gray-400">Total Pengerjaan</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<div class="max-w-6xl mx-auto px-4 pb-16">
+
+<!-- Filter + Search -->
+<div class="flex flex-col sm:flex-row gap-3 mb-5">
+<div class="relative flex-1">
+<input type="text" x-model="search" placeholder="Cari quiz..."
+class="q-input pl-9 dark:bg-gray-800 dark:border-gray-700 dark:text-white">
+</div>
+<div class="flex gap-2">
+<template x-for="f in filters" :key="f.value">
+<button @click="activeFilter = f.value"
+:class="activeFilter === f.value ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-purple-400'"
+class="px-3 py-2 text-xs font-semibold border rounded-lg transition-all" x-text="f.label"></button>
+</template>
+</div>
+</div>
+
+<!-- Loading -->
+<div x-show="loading" class="flex justify-center py-20">
+<div class="flex flex-col items-center gap-3">
+<svg class="animate-spin h-8 w-8 text-purple-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+<span class="text-sm text-gray-500 dark:text-gray-400">Memuat quiz...</span>
+</div>
+</div>
+
+<!-- Empty state -->
+<div x-show="!loading && filteredQuizzes.length === 0" class="text-center py-20">
+<div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-purple-100 dark:bg-purple-900/30 mb-4">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+</div>
+<h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">Belum ada quiz</h3>
+<p class="text-sm text-gray-500 dark:text-gray-500 mb-6">Mulai buat quiz pertama Anda</p>
+<a href="/admin/quiz/builder" class="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+Buat Quiz Pertama
+</a>
+</div>
+
+<!-- Quiz Grid -->
+<div x-show="!loading && filteredQuizzes.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+<template x-for="q in filteredQuizzes" :key="q.id">
+<div class="quiz-card bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col">
+<!-- Color bar by status -->
+<div class="h-1.5 w-full"
+:class="{
+               'bg-green-400': q.status === 'open',
+               'bg-amber-400': q.status === 'locked',
+               'bg-red-400':   q.status === 'closed',
+               'bg-gray-300':  q.status === 'draft',
+             }"></div>
+
+<div class="p-5 flex-1 flex flex-col">
+<!-- Header -->
+<div class="flex items-start justify-between gap-2 mb-3">
+<h3 class="font-bold text-gray-800 dark:text-white text-sm leading-snug line-clamp-2 flex-1" x-text="q.title"></h3>
+<span class="type-badge shrink-0"
+:class="{
+                    'badge-open':   q.status === 'open',
+                    'badge-locked': q.status === 'locked',
+                    'badge-closed': q.status === 'closed',
+                    'badge-draft':  q.status === 'draft',
+                  }"
+x-text="statusLabel(q.status)"></span>
+</div>
+
+<p class="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2 flex-1" x-text="q.description || 'Tidak ada deskripsi'"></p>
+<p class="text-[11px] font-semibold mb-4" :class="q.kelas_akses && q.kelas_akses.length ? 'text-purple-600 dark:text-purple-300' : 'text-gray-400'" x-text="q.kelas_akses && q.kelas_akses.length ? 'Akses: ' + q.kelas_akses.join(', ') : 'Akses: semua kelas'"></p>
+
+<!-- Meta -->
+<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 mb-4">
+<span class="flex items-center gap-1">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span x-text="(q.question_count || 0) + ' soal'"></span>
+</span>
+<span x-show="q.time_limit > 0" class="flex items-center gap-1">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<span x-text="q.time_limit + ' menit'"></span>
+</span>
+<span class="flex items-center gap-1">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+<span x-text="(q.submission_count || 0) + ' pengerjaan'"></span>
+</span>
+</div>
+
+<!-- Actions -->
+<div class="flex gap-2 mt-auto">
+<!-- Status toggle -->
+<div class="relative flex-1" x-data="{open:false}">
+<button @click="open=!open"
+class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-purple-400 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
+Status
+</button>
+<div x-show="open" @click.away="open=false" x-transition
+class="absolute bottom-full left-0 mb-1 w-36 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-30 overflow-hidden">
+<template x-for="s in statusOptions" :key="s.value">
+<button @click="changeStatus(q, s.value); open=false"
+:class="q.status === s.value ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 font-bold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
+class="w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors">
+<span x-html="s.icon"></span>
+<span x-text="s.label"></span>
+</button>
+</template>
+</div>
+</div>
+
+<a :href="'/admin/quiz/builder?id=' + q.id"
+class="flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+Edit
+</a>
+
+<a :href="'/admin/quiz/results?quiz_id=' + q.id"
+class="flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+Hasil
+</a>
+
+<button @click="confirmDelete(q)"
+class="flex items-center justify-center px-2.5 py-2 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 border border-transparent hover:border-red-200 dark:hover:border-red-800 rounded-lg transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+</button>
+</div>
+
+<!-- Take link (for students) -->
+<div x-show="q.status === 'open'" class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+<a :href="'/quiz/take?id=' + q.id"
+class="w-full flex items-center justify-center gap-2 py-2 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-xs font-semibold border border-green-200 dark:border-green-800 rounded-lg hover:bg-green-100 transition-all">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+Buka Link Mahasiswa
+</a>
+</div>
+</div>
+</div>
+</template>
+</div>
+</div>
+
+<!-- ===== DELETE CONFIRM MODAL ===== -->
+<div x-show="deleteTarget" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" @click.self="deleteTarget=null">
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" x-transition>
+<div class="flex items-center gap-3 mb-4">
+<div class="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+</div>
+<div>
+<h3 class="font-bold text-gray-800 dark:text-white">Hapus Quiz?</h3>
+<p class="text-xs text-gray-500 dark:text-gray-400" x-text="deleteTarget?.title"></p>
+</div>
+</div>
+<p class="text-sm text-gray-600 dark:text-gray-400 mb-5">Semua data pengerjaan mahasiswa juga akan dihapus. Tindakan ini tidak dapat dibatalkan.</p>
+<div class="flex gap-3">
+<button @click="deleteTarget=null" class="flex-1 py-2.5 text-sm font-semibold border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">Batal</button>
+<button @click="doDelete()" class="flex-1 py-2.5 text-sm font-semibold bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all">Hapus</button>
+</div>
+</div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div id="toast-root" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+<script>
+function dashboard() {
+return {
+quizzes: [],
+loading: true,
+search: '',
+activeFilter: 'all',
+deleteTarget: null,
+
+filters: [
+{ value: 'all',    label: 'Semua' },
+{ value: 'open',   label: 'Buka' },
+{ value: 'locked', label: 'Kunci' },
+{ value: 'closed', label: 'Tutup' },
+{ value: 'draft',  label: 'Draft' },
+],
+
+statusOptions: [
+{ value: 'draft',  label: 'Draft',    icon: '<svg class="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>' },
+{ value: 'open',   label: 'Buka',     icon: '<svg class="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
+{ value: 'locked', label: 'Kunci',    icon: '<svg class="h-3.5 w-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>' },
+{ value: 'closed', label: 'Tutup',    icon: '<svg class="h-3.5 w-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>' },
+],
+
+get filteredQuizzes() {
+return this.quizzes.filter(q => {
+const matchFilter = this.activeFilter === 'all' || q.status === this.activeFilter;
+const matchSearch = !this.search || q.title.toLowerCase().includes(this.search.toLowerCase()) || (q.description || '').toLowerCase().includes(this.search.toLowerCase());
+return matchFilter && matchSearch;
+});
+},
+
+get stats() {
+return {
+total:       this.quizzes.length,
+open:        this.quizzes.filter(q => q.status === 'open').length,
+locked:      this.quizzes.filter(q => q.status === 'locked').length,
+submissions: this.quizzes.reduce((s, q) => s + (q.submission_count || 0), 0),
+};
+},
+
+async init() {
+const dark = localStorage.getItem('darkMode') === 'enabled';
+if (dark) document.documentElement.classList.add('dark');
+await this.loadQuizzes();
+},
+
+async loadQuizzes() {
+this.loading = true;
+try {
+const res = await fetch('/api/quiz?action=list_quizzes');
+const data = await res.json();
+if (data.ok) this.quizzes = data.quizzes;
+} catch(e) {
+this.toast('Gagal memuat data', 'error');
+}
+this.loading = false;
+},
+
+async changeStatus(q, status) {
+const res = await fetch('/api/quiz?action=set_status', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ id: q.id, status }),
+});
+const data = await res.json();
+if (data.ok) {
+q.status = status;
+this.toast('Status diubah ke: ' + this.statusLabel(status), 'success');
+} else {
+this.toast(data.error || 'Gagal', 'error');
+}
+},
+
+confirmDelete(q) { this.deleteTarget = q; },
+
+async doDelete() {
+if (!this.deleteTarget) return;
+const res = await fetch('/api/quiz?action=delete_quiz', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ id: this.deleteTarget.id }),
+});
+const data = await res.json();
+if (data.ok) {
+this.quizzes = this.quizzes.filter(q => q.id !== this.deleteTarget.id);
+this.toast('Quiz berhasil dihapus', 'success');
+} else {
+this.toast(data.error || 'Gagal menghapus', 'error');
+}
+this.deleteTarget = null;
+},
+
+statusLabel(s) {
+return { draft: 'Draft', open: 'Buka', locked: 'Kunci', closed: 'Tutup' }[s] || s;
+},
+
+toast(msg, type = 'info') {
+const root = document.getElementById('toast-root');
+const colors = {
+success: 'bg-green-100 dark:bg-green-800/90 border-green-300 text-green-800 dark:text-green-100',
+error:   'bg-red-100 dark:bg-red-800/90 border-red-300 text-red-800 dark:text-red-100',
+info:    'bg-blue-100 dark:bg-blue-800/90 border-blue-300 text-blue-800 dark:text-blue-100',
+warning: 'bg-amber-100 dark:bg-amber-800/90 border-amber-300 text-amber-800 dark:text-amber-100',
+};
+const t = document.createElement('div');
+t.className = `toast-item flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium max-w-xs ${colors[type] || colors.info}`;
+t.innerHTML = `<span>${msg}</span>`;
+root.appendChild(t);
+requestAnimationFrame(() => t.classList.add('show'));
+setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 3500);
+},
+};
+}
+</script>

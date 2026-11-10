@@ -1,0 +1,77 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import Icon from '../../components/Icon.astro';
+import { all, run } from '../../lib/db';
+import { semesterAktif, listJadwal, HARI, PERAN, labelKelas, rapikanNama } from '../../lib/jadwal';
+import { flashUrl, str, int } from '../../lib/util';
+
+if (Astro.request.method === 'POST') {
+  const f = await Astro.request.formData();
+  const aksi = str(f.get('aksi'));
+  const id = int(f.get('id'));
+  try {
+    if (aksi === 'tambah') {
+      const nama = rapikanNama(str(f.get('nama')));
+      if (!nama) return Astro.redirect(flashUrl('/admin/asisten', 'err', 'Nama asisten wajib diisi.'));
+      run('INSERT INTO asisten(nama) VALUES (?)', nama);
+      return Astro.redirect(flashUrl('/admin/asisten', 'ok', `Asisten ${nama} ditambahkan.`));
+    }
+    if (aksi === 'ubah') { run('UPDATE asisten SET nama = ? WHERE id = ?', rapikanNama(str(f.get('nama'))), id); return Astro.redirect(flashUrl('/admin/asisten', 'ok', 'Nama asisten diperbarui.')); }
+    if (aksi === 'toggle') { run('UPDATE asisten SET aktif = 1 - aktif WHERE id = ?', id); return Astro.redirect(flashUrl('/admin/asisten', 'ok', 'Status asisten diubah.')); }
+    if (aksi === 'hapus') { run('DELETE FROM asisten WHERE id = ?', id); return Astro.redirect(flashUrl('/admin/asisten', 'ok', 'Asisten dihapus dari daftar & jadwal.')); }
+  } catch (e: any) {
+    if (String(e?.message).includes('UNIQUE')) return Astro.redirect(flashUrl('/admin/asisten', 'err', 'Nama asisten sudah ada.'));
+    throw e;
+  }
+}
+const sem = semesterAktif();
+const jadwal = listJadwal();
+const tugas = new Map<number, { label: string; peran: string }[]>();
+for (const j of jadwal) j.asisten_id.forEach((aid, i) => {
+  if (!aid) return;
+  if (!tugas.has(aid)) tugas.set(aid, []);
+  tugas.get(aid)!.push({ label: `${HARI[j.hari]} ${j.jam_mulai} · ${labelKelas(j)}`, peran: PERAN[i] });
+});
+const list = all<{ id: number; nama: string; aktif: number }>('SELECT * FROM asisten ORDER BY aktif DESC, nama COLLATE NOCASE');
+---
+<AdminLayout title="Asisten" active="asisten" alpine>
+  <div class="grid lg:grid-cols-3 gap-6" x-data="{ edit: null }">
+    <div class="space-y-4">
+      <form method="post" class="card p-5 space-y-3">
+        <input type="hidden" name="aksi" value="tambah" />
+        <h2 class="font-extrabold flex items-center gap-2"><Icon name="plus" /> Tambah Asisten</h2>
+        <input name="nama" class="input" required placeholder="Nama panggilan, contoh: Petra" />
+        <button class="btn btn-primary w-full">Simpan</button>
+      </form>
+      <div class="card p-5 text-sm text-gray-600 dark:text-gray-300 space-y-2">
+        <p>Asisten juga otomatis ditambahkan saat mengisi atau meng-import <a href="/admin/jadwal" class="text-blue-600 font-semibold">Jadwal Semester</a>.</p>
+        <p>Asisten <b>PJ</b> di jadwal terisi otomatis sebagai penanggung jawab ketika sesi Kontrak dibuka.</p>
+      </div>
+    </div>
+    <div class="lg:col-span-2 card overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex justify-between"><h2 class="font-extrabold">Daftar Asisten · tugas di {sem?.nama ?? '-'}</h2><span class="badge bg-gray-100 dark:bg-gray-700">{list.length}</span></div>
+      <div class="divide-y divide-gray-100 dark:divide-gray-700/60">
+        {list.map((a) => (
+          <div class:list={['px-5 py-3', !a.aktif && 'opacity-50']}>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex items-center justify-center text-xs font-black">{a.nama.slice(0, 2).toUpperCase()}</span>
+              <span class="font-bold flex-1" x-show={`edit !== ${a.id}`}>{a.nama} {!a.aktif && <span class="badge bg-gray-200 text-gray-600">nonaktif</span>}</span>
+              <form method="post" class="flex-1 flex gap-2" x-show={`edit === ${a.id}`}><input type="hidden" name="aksi" value="ubah" /><input type="hidden" name="id" value={a.id} />
+                <input name="nama" value={a.nama} class="input !py-1.5" /><button class="btn btn-sm btn-primary">Simpan</button></form>
+              <span class="text-xs text-gray-500">{tugas.get(a.id)?.length ?? 0} kelas</span>
+              <button type="button" class="btn btn-sm btn-ghost" @click={`edit = edit === ${a.id} ? null : ${a.id}`}><Icon name="pencil" class="w-3.5 h-3.5" /></button>
+              <form method="post"><input type="hidden" name="aksi" value="toggle" /><input type="hidden" name="id" value={a.id} /><button class="btn btn-sm btn-ghost">{a.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button></form>
+              <form method="post" onsubmit="return confirm('Hapus asisten ini? Namanya juga hilang dari semua jadwal.')"><input type="hidden" name="aksi" value="hapus" /><input type="hidden" name="id" value={a.id} />
+                <button class="btn btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"><Icon name="trash" class="w-3.5 h-3.5" /></button></form>
+            </div>
+            {(tugas.get(a.id) ?? []).length > 0 && (
+              <div class="flex flex-wrap gap-1.5 mt-2 pl-10">
+                {tugas.get(a.id)!.map((t) => <span class:list={['badge', t.peran === 'PJ' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300']}>{t.peran === 'PJ' ? 'PJ · ' : ''}{t.label}</span>)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+</AdminLayout>

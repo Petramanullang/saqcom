@@ -1,0 +1,5 @@
+---
+import LegacyAdmin from '../../../components/LegacyAdmin.astro';
+import html from '../../../legacy/quiz-admin-results.html?raw';
+---
+<LegacyAdmin html={html} title="Hasil Quiz" active="quiz_admin" scripts={['/vendor/xlsx.full.min.js']} />

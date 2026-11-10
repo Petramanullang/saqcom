@@ -1,0 +1,132 @@
+---
+import '../styles/global.css';
+import Icon from '../components/Icon.astro';
+import { semesterAktif, kelasHariIni, labelKelas } from '../lib/jadwal';
+import { get } from '../lib/db';
+
+interface Props {
+  title: string;
+  active?: string;
+  alpine?: boolean;
+  width?: 'xl' | 'full';
+  scripts?: string[];
+  /** Isi halaman tanpa padding (dipakai halaman quiz lama). */
+  flush?: boolean;
+}
+const { title, active = '', alpine = false, width = 'xl', scripts = [], flush = false } = Astro.props;
+const flashOk = Astro.url.searchParams.get('ok');
+const flashErr = Astro.url.searchParams.get('err');
+const sem = semesterAktif();
+const { berjalan } = kelasHariIni();
+const laporan = get<{ c: number }>("SELECT COUNT(*) c FROM laporan_kerusakan WHERE status = 'pending'")!.c;
+
+const grup = [
+  { judul: '', menu: [{ key: 'admin', href: '/admin', label: 'Dashboard', icon: 'home' }] },
+  { judul: 'Praktikum', menu: [
+    { key: 'tugas', href: '/admin/tugas', label: 'Tugas Masuk', icon: 'inbox' },
+    { key: 'kelas', href: '/admin/tugas/kelas', label: 'Tugas, Deadline & Mahasiswa', icon: 'calendar' },
+    { key: 'materi_admin', href: '/admin/materi', label: 'Upload Materi', icon: 'book' },
+    { key: 'quiz_admin', href: '/admin/quiz', label: 'Quiz', icon: 'quiz' },
+    { key: 'kontrak_admin', href: '/admin/kontrak', label: 'Kontrak Tempat Duduk', icon: 'seat', badge: laporan },
+    { key: 'timer', href: '/admin/timer', label: 'Timer Kelas', icon: 'clock', blank: true },
+  ] },
+  { judul: 'Data Akademik', menu: [
+    { key: 'jadwal', href: '/admin/jadwal', label: 'Jadwal Semester', icon: 'table' },
+    { key: 'matkul', href: '/admin/matkul', label: 'Mata Kuliah', icon: 'book' },
+    { key: 'dosen', href: '/admin/dosen', label: 'Dosen', icon: 'users' },
+    { key: 'asisten', href: '/admin/asisten', label: 'Asisten', icon: 'shield' },
+    { key: 'database', href: '/admin/database', label: 'Struktur Database', icon: 'archive' },
+  ] },
+  { judul: 'Sistem', menu: [{ key: 'pengaturan', href: '/admin/pengaturan', label: 'Pengaturan', icon: 'cog' }] },
+] as const;
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} - Panel Asisten SAQ</title>
+    <link rel="icon" type="image/webp" href="/img/lab-saql.webp" />
+    <script is:inline>try { if (localStorage.getItem('darkMode') === 'enabled') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    {scripts.map((s) => <script is:inline src={s}></script>)}
+    {alpine && <script is:inline defer src="/vendor/alpine.min.js"></script>}
+    <slot name="head" />
+  </head>
+  <body class="min-h-screen bg-slate-100 dark:bg-gray-950">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-64 -translate-x-full lg:translate-x-0 transition-transform bg-slate-900 text-slate-300 flex flex-col print:hidden">
+      <a href="/admin" class="flex items-center gap-3 px-5 h-16 border-b border-white/10 shrink-0">
+        <img src="/img/lab-saql.webp" alt="" class="h-8 w-8 object-contain bg-white rounded-lg p-0.5" />
+        <span><span class="block text-sm font-black text-white tracking-wide">PANEL ASISTEN</span><span class="block text-[11px] text-slate-400">SAQ Laboratory</span></span>
+      </a>
+      <div class="px-4 py-3 border-b border-white/10 text-xs">
+        <a href="/admin/jadwal" class="block rounded-xl bg-white/5 hover:bg-white/10 px-3 py-2">
+          <span class="text-slate-400">Semester aktif</span>
+          <span class="block font-bold text-white">{sem?.nama ?? 'Belum diatur'}</span>
+        </a>
+        {berjalan && (
+          <div class="mt-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+            <span class="flex items-center gap-1.5 text-emerald-400 font-bold"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Sedang berjalan</span>
+            <span class="block text-slate-200 leading-snug mt-0.5">{labelKelas(berjalan.jadwal)}</span>
+            {berjalan.jadwal.asisten[0] && <span class="block text-slate-400">PJ: {berjalan.jadwal.asisten[0]}</span>}
+          </div>
+        )}
+      </div>
+      <nav class="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+        {grup.map((g) => (
+          <div>
+            {g.judul && <p class="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">{g.judul}</p>}
+            {g.menu.map((m) => (
+              <a href={m.href} target={'blank' in m ? '_blank' : undefined}
+                class:list={['flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition', m.key === active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'hover:bg-white/5 hover:text-white']}>
+                <Icon name={m.icon} class="w-[18px] h-[18px] shrink-0" />
+                <span class="flex-1 truncate">{m.label}</span>
+                {'badge' in m && m.badge > 0 && <span class="min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{m.badge}</span>}
+              </a>
+            ))}
+          </div>
+        ))}
+      </nav>
+      <div class="p-3 border-t border-white/10 space-y-1">
+        <a href="/" target="_blank" class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm hover:bg-white/5 hover:text-white"><Icon name="eye" class="w-[18px] h-[18px]" /> Lihat situs mahasiswa</a>
+        <button type="button" data-theme-toggle class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm hover:bg-white/5 hover:text-white cursor-pointer">
+          <span class="dark:hidden inline-flex items-center gap-3"><Icon name="moon" class="w-[18px] h-[18px]" /> Mode gelap</span>
+          <span class="hidden dark:inline-flex items-center gap-3"><Icon name="sun" class="w-[18px] h-[18px]" /> Mode terang</span>
+        </button>
+        <p class="px-3 pt-1 text-[11px] text-slate-500">IP: {Astro.locals.ip}</p>
+      </div>
+    </aside>
+    <div id="sidebar-backdrop" class="fixed inset-0 z-40 bg-black/50 hidden lg:hidden"></div>
+
+    <div class="lg:pl-64 min-h-screen flex flex-col">
+      <header class="sticky top-0 z-30 h-16 flex items-center gap-3 px-4 sm:px-6 bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-gray-200 dark:border-gray-800 print:hidden">
+        <button type="button" id="sidebar-open" class="lg:hidden p-2 -ml-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer" aria-label="Menu"><Icon name="menu" class="w-5 h-5" /></button>
+        <h1 class="font-extrabold text-base sm:text-lg truncate flex-1">{title}</h1>
+        <slot name="actions" />
+      </header>
+      <main class:list={['flex-1 w-full', flush ? '' : width === 'full' ? 'px-4 sm:px-6 py-6' : 'max-w-7xl mx-auto px-4 sm:px-6 py-6']}>
+        {(flashOk || flashErr) && (
+          <div data-flash class:list={['mb-6 p-4 border-l-4 rounded-xl text-sm flex items-start justify-between gap-4 shadow-sm', flush && 'm-4',
+            flashOk ? 'bg-green-50 dark:bg-green-900/20 border-green-500 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-900/20 border-red-500 text-red-800 dark:text-red-200']}>
+            <span>{flashOk || flashErr}</span>
+            <button type="button" class="font-bold opacity-60 hover:opacity-100 cursor-pointer" onclick="this.parentElement.remove()">&times;</button>
+          </div>
+        )}
+        <slot />
+      </main>
+    </div>
+    <script is:inline>
+      (function () {
+        document.querySelectorAll('[data-theme-toggle]').forEach(function (b) {
+          b.addEventListener('click', function () { var d = document.documentElement.classList.toggle('dark'); try { localStorage.setItem('darkMode', d ? 'enabled' : 'disabled'); } catch (e) {} });
+        });
+        var sb = document.getElementById('sidebar'), bd = document.getElementById('sidebar-backdrop');
+        function buka(v) { sb.classList.toggle('-translate-x-full', !v); bd.classList.toggle('hidden', !v); }
+        document.getElementById('sidebar-open').addEventListener('click', function () { buka(true); });
+        bd.addEventListener('click', function () { buka(false); });
+        document.addEventListener('click', function (e) { document.querySelectorAll('details[data-dropdown][open]').forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute('open'); }); });
+        if (location.search.match(/[?&](ok|err)=/)) { var u = new URL(location.href); u.searchParams.delete('ok'); u.searchParams.delete('err'); history.replaceState(null, '', u.pathname + u.search + u.hash); }
+      })();
+    </script>
+  </body>
+</html>
